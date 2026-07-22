@@ -3,15 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "render-postbuild": "PUPPETEER_CACHE_DIR=/opt/render/project/src/.cache/puppeteer npx puppeteer browsers install chrome"
+    "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.21.2",
-    "whatsapp-web.js": "^1.26.0",
+    "@whiskeysockets/baileys": "^6.7.9",
     "qrcode-terminal": "^0.12.0",
-    "mysql2": "^3.11.0",
     "axios": "^1.7.9",
-    "puppeteer": "^24.0.0"
+    "pino": "^9.5.0"
   }
 }
