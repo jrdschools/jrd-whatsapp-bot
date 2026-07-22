@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -18,12 +18,16 @@ let isBotReady = false;
 // 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना (हल्का, बिना Chrome के)
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { version } = await fetchLatestBaileysVersion();
+    console.log('ℹ️ WhatsApp Web version इस्तेमाल हो रहा है:', version.join('.'));
 
     sock = makeWASocket({
         auth: state,
+        version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        syncFullHistory: false
+        syncFullHistory: false,
+        browser: ['JRD School Bot', 'Chrome', '1.0.0']
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -41,9 +45,10 @@ async function startBot() {
             isBotReady = false;
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '| दोबारा कनेक्ट करें:', shouldReconnect);
+            console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
             if (shouldReconnect) {
-                startBot();
+                // 🛑 तुरंत दोबारा कनेक्ट करने की बजाय 5 सेकंड रुककर करें, ताकि बार-बार क्रैश लूप न बने
+                setTimeout(() => startBot(), 5000);
             } else {
                 console.log('❌ Logged out. auth_info_baileys फ़ोल्डर हटाकर दोबारा QR स्कैन करना होगा।');
             }
