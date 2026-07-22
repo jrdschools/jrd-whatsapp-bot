@@ -27,8 +27,29 @@ const client = new Client({
     }
 });
 
-client.on('qr', (qr) => qrcode.generate(qr, { small: true }));
+let currentQrCode = '';
 
+client.on('qr', (qr) => {
+    currentQrCode = qr;
+    console.log('👉 QR Code जनरेट हो गया है! नीचे दिए गए लिंक पर जाकर स्कैन करें:');
+    qrcode.generate(qr, { small: true });
+});
+
+// 🌐 QR कोड को ब्राउज़र में साफ़-सुथरा देखने के लिए URL Endpoint
+app.get('/qr', (req, res) => {
+    if (!currentQrCode) {
+        return res.send('<h2>QR Code तैयार हो रहा है या व्हाट्सएप पहले से कनेक्टेड है... कृपया 10 सेकंड बाद Refresh करें।</h2>');
+    }
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQrCode)}`;
+    res.send(`
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family:sans-serif;">
+            <h2>🏫 JRD Public School WhatsApp Bot</h2>
+            <p>अपने व्हाट्सएप से इस QR कोड को स्कैन करें:</p>
+            <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 2px solid #333; padding: 10px; border-radius: 10px;"/>
+            <p><i>स्कैन करने के बाद पेज बंद कर सकते हैं।</i></p>
+        </div>
+    `);
+});
 client.on('ready', () => {
     console.log('\n=============================================');
     console.log(' JRD Enterprise VIP Bot Active & Secured! ');
