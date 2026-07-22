@@ -2,6 +2,9 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(express.json());
@@ -9,13 +12,32 @@ app.use(express.urlencoded({ extended: true }));
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-const puppeteer = require('puppeteer');
+// 🔍 Chrome का सही पाथ हमेशा खुद ढूंढने वाला फ़ंक्शन (कभी crash नहीं होगा)
+function findChromePath() {
+    const baseDir = '/opt/render/project/src/.cache/puppeteer/chrome';
+    try {
+        if (fs.existsSync(baseDir)) {
+            const versions = fs.readdirSync(baseDir);
+            if (versions.length > 0) {
+                const chromePath = path.join(baseDir, versions[0], 'chrome-linux64', 'chrome');
+                if (fs.existsSync(chromePath)) {
+                    console.log('✅ Chrome मिल गया यहाँ:', chromePath);
+                    return chromePath;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Chrome पाथ ढूंढने में त्रुटि:', err.message);
+    }
+    console.log('⚠️ Custom पाथ नहीं मिला, डिफ़ॉल्ट puppeteer.executablePath() इस्तेमाल हो रहा है');
+    return puppeteer.executablePath();
+}
 
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: "JRD_BOT_SESSION" }),
     puppeteer: {
         headless: true,
-        executablePath: puppeteer.executablePath(),
+        executablePath: findChromePath(),
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
