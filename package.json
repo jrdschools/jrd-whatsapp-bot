@@ -9,6 +9,7 @@
     "express": "^4.21.2",
     "whatsapp-web.js": "^1.26.0",
     "qrcode-terminal": "^0.12.0",
-    "mysql2": "^3.11.0"
+    "mysql2": "^3.11.0",
+    "axios": "^1.7.9"
   }
 }
