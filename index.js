@@ -1,7 +1,3 @@
-const { updateAttendanceSmsStatus, testDbConnection } = require('./db');
-
-// बोट स्टार्ट होते ही DB कनेक्शन टेस्ट करें
-testDbConnection();
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
@@ -151,7 +147,7 @@ _नोट: जानकारी केवल पंजीकृत (Registered
     } 
 
     if (lowerText === '1') {
-        await msg.reply(`📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
+        await msg.reply(`📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें। *`);
         return;
     } 
     if (lowerText === '2') {
