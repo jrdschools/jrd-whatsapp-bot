@@ -298,3 +298,14 @@ app.post('/send-whatsapp', async (req, res) => {
 
 app.listen(3000, () => console.log('Secure VIP Bot running on port 3000'));
 startBot();
+
+// 🔄 Keep-Alive Self Ping (24/7 एक्टिव रखने के लिए)
+const https = require('https');
+
+setInterval(() => {
+    https.get('https://jrd-whatsapp-bot.onrender.com/', (res) => {
+        console.log('⚡ Self-Ping successful: Server is active');
+    }).on('error', (err) => {
+        console.error('❌ Self-Ping error:', err.message);
+    });
+}, 4 * 60 * 1000); // हर 4 मिनट में खुद को कॉल करेगा
