@@ -302,10 +302,13 @@ startBot();
 // 🔄 Keep-Alive Self Ping (24/7 एक्टिव रखने के लिए)
 const https = require('https');
 
+// 🔄 Keep-Alive Self Ping (24/7 एक्टिव रखने के लिए)
+const https = require('https');
+
 setInterval(() => {
-    https.get('https://jrd-whatsapp-bot.onrender.com/', (res) => {
+    https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
     }).on('error', (err) => {
         console.error('❌ Self-Ping error:', err.message);
     });
-}, 4 * 60 * 1000); // हर 4 मिनट में खुद को कॉल करेगा
+}, 4 * 60 * 1000); // हर 4 मिनट में खुद को पिंग करेगा ताकि स्लीप मोड में न जाए
