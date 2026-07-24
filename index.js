@@ -47,7 +47,6 @@ async function startBot() {
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
             if (shouldReconnect) {
-                // 🛑 तुरंत दोबारा कनेक्ट करने की बजाय 5 सेकंड रुककर करें, ताकि बार-बार क्रैश लूप न बने
                 setTimeout(() => startBot(), 5000);
             } else {
                 console.log('❌ Logged out. auth_info_baileys फ़ोल्डर हटाकर दोबारा QR स्कैन करना होगा।');
@@ -68,7 +67,7 @@ async function startBot() {
         if (!msg.message || msg.key.fromMe) return;
 
         const jid = msg.key.remoteJid;
-        if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return; // ग्रुप/स्टेटस को अनदेखा करें
+        if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
 
         try {
             await sock.readMessages([msg.key]);
@@ -171,7 +170,7 @@ async function sendReply(jid, text) {
     }
 }
 
-// 🎨 VIP प्रोफाइल कार्ड फ़ंक्शन (FULL BREAKDOWN ACTIVE)
+// 🎨 VIP प्रोफाइल कार्ड फ़ंक्शन
 async function sendStudentProfileCard(jid, s) {
     const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*
 🏫 *JRD Public School, Marui*
@@ -207,7 +206,7 @@ _यदि फ़ीस अथवा विवरण में कोई त्�
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड को ब्राउज़र में साफ़-सुथरा देखने के लिए URL Endpoint
+// 🌐 QR कोड को ब्राउज़र में देखने के लिए URL Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -221,7 +220,7 @@ app.get('/qr', (req, res) => {
             <h2>🏫 JRD Public School WhatsApp Bot</h2>
             <p>अपने व्हाट्सएप से इस QR कोड को स्कैन करें:</p>
             <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 2px solid #333; padding: 10px; border-radius: 10px; width: 300px; height: 300px;"/>
-            <p><i>स्कैन करने के बाद इस पेज को बंद कर सकते हैं। (यह QR ~20 सेकंड में बदल भी सकता है, तो जल्दी स्कैन करें)</i></p>
+            <p><i>स्कैन करने के बाद इस पेज को बंद कर सकते हैं।</i></p>
         </div>
     `);
 });
@@ -250,11 +249,9 @@ async function processQueue() {
             console.log(`✅ [${item.type}] मैसेज भेजा गया -> ${formattedNumber}`);
             processedCount++;
 
-            // ⏱️ रैंडम डिले: 4 से 8 सेकंड के बीच (ताकि व्हाट्सएप स्पैम न समझे)
             const randomDelay = Math.floor(Math.random() * 4000) + 4000;
             await new Promise(res => setTimeout(res, randomDelay));
 
-            // 🛑 हर 20 मैसेज के बाद 15 सेकंड का लंबा पॉज (Break)
             if (processedCount % 20 === 0) {
                 console.log('⏸️ व्हाट्सएप सुरक्षा: 15 सेकंड का ब्रेक लिया जा रहा है...');
                 await new Promise(res => setTimeout(res, 15000));
@@ -268,7 +265,6 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 📩 ऐप्स स्क्रिप्ट से आने वाले बल्क/ऑटो मैसेज क्यू में जोड़ना
 app.post('/enqueue-message', (req, res) => {
     const { number, message, type } = req.body;
     if (!number || !message) return res.status(400).json({ status: 'error', message: 'Missing fields' });
@@ -281,7 +277,6 @@ app.post('/enqueue-message', (req, res) => {
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
 });
 
-// 📩 डायरेक्ट सिंगल मैसेज सेंड API
 app.post('/send-whatsapp', async (req, res) => {
     const { number, message } = req.body;
     if (!number || !message) return res.status(400).json({ status: 'error' });
@@ -299,10 +294,7 @@ app.post('/send-whatsapp', async (req, res) => {
 app.listen(3000, () => console.log('Secure VIP Bot running on port 3000'));
 startBot();
 
-// 🔄 Keep-Alive Self Ping (24/7 एक्टिव रखने के लिए)
-const https = require('https');
-
-// 🔄 Keep-Alive Self Ping (24/7 एक्टिव रखने के लिए)
+// 🔄 Keep-Alive Self Ping (Railway को 24/7 एक्टिव रखने के लिए)
 const https = require('https');
 
 setInterval(() => {
@@ -311,4 +303,4 @@ setInterval(() => {
     }).on('error', (err) => {
         console.error('❌ Self-Ping error:', err.message);
     });
-}, 4 * 60 * 1000); // हर 4 मिनट में खुद को पिंग करेगा ताकि स्लीप मोड में न जाए
+}, 4 * 60 * 1000); // हर 4 मिनट में खुद को पिंग करेगा
