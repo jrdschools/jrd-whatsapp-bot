@@ -4,6 +4,8 @@ const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
 const axios = require('axios');
+const PDFDocument = require('pdfkit');
+const https = require('https');
 
 const app = express();
 app.use(express.json());
@@ -15,7 +17,7 @@ let sock;
 let currentQrCode = '';
 let isBotReady = false;
 
-// 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना (हल्का, बिना Chrome के)
+// 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -170,6 +172,61 @@ async function sendReply(jid, text) {
     }
 }
 
+// 📄 PDF रसीद जनरेट करके WhatsApp पर भेजने वाला फ़ंक्शन
+async function sendFeePdfReceipt(jid, data) {
+    return new Promise((resolve, reject) => {
+        try {
+            const doc = new PDFDocument({ size: 'A6', margin: 20 });
+            let buffers = [];
+
+            doc.on('data', buffers.push.bind(buffers));
+            doc.on('end', async () => {
+                const pdfBuffer = Buffer.concat(buffers);
+
+                await sock.sendMessage(jid, {
+                    document: pdfBuffer,
+                    mimetype: 'application/pdf',
+                    fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf`,
+                    caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद।`
+                });
+                resolve();
+            });
+
+            // 🎨 PDF डिज़ाइन
+            doc.fontSize(14).text('J.R.D. PUBLIC SCHOOL', { align: 'center', bold: true });
+            doc.fontSize(9).text('Marui, Varanasi (U.P.)', { align: 'center' });
+            doc.moveDown(0.5);
+            doc.fontSize(10).text('-------------------------------------------', { align: 'center' });
+            doc.fontSize(11).text('OFFICIAL FEE RECEIPT', { align: 'center' });
+            doc.text('-------------------------------------------', { align: 'center' });
+            doc.moveDown(0.5);
+
+            doc.fontSize(9);
+            doc.text(`Receipt No : ${data.rid || 'N/A'}`);
+            doc.text(`Student    : ${data.name || 'N/A'}`);
+            doc.text(`Class      : ${data.className || 'N/A'}`);
+            doc.text(`Session    : ${data.session || '2026-27'}`);
+            doc.moveDown(0.5);
+            
+            doc.text('-------------------------------------------');
+            doc.text(`Amount Paid: Rs. ${data.paid || 0}/-`, { bold: true });
+            doc.text('-------------------------------------------');
+            doc.moveDown(0.5);
+
+            doc.text('Details / Breakdown:');
+            const cleanDetails = (data.details || '').replace(/<br>/g, '\n');
+            doc.fontSize(8).text(cleanDetails);
+
+            doc.moveDown(1);
+            doc.fontSize(8).text('Thank you! JRD Public School Management.', { align: 'center', italic: true });
+
+            doc.end();
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
 // 🎨 VIP प्रोफाइल कार्ड फ़ंक्शन
 async function sendStudentProfileCard(jid, s) {
     const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*
@@ -206,7 +263,7 @@ _यदि फ़ीस अथवा विवरण में कोई त्�
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड को ब्राउज़र में देखने के लिए URL Endpoint
+// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -244,9 +301,16 @@ async function processQueue() {
         try {
             let formattedNumber = item.number.toString().replace(/[^0-9]/g, '');
             if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
+            const jid = formattedNumber + '@s.whatsapp.net';
 
-            await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: item.message });
-            console.log(`✅ [${item.type}] मैसेज भेजा गया -> ${formattedNumber}`);
+            if (item.type === 'FEE_RECEIPT') {
+                await sendFeePdfReceipt(jid, item);
+                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
+            } else {
+                await sock.sendMessage(jid, { text: item.message });
+                console.log(`✅ [${item.type}] मैसेज भेजा गया -> ${formattedNumber}`);
+            }
+
             processedCount++;
 
             const randomDelay = Math.floor(Math.random() * 4000) + 4000;
@@ -266,11 +330,11 @@ async function processQueue() {
 }
 
 app.post('/enqueue-message', (req, res) => {
-    const { number, message, type } = req.body;
-    if (!number || !message) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+    const { number, message, type, name, className, session, rid, paid, details } = req.body;
+    if (!number) return res.status(400).json({ status: 'error', message: 'Missing fields' });
 
-    messageQueue.push({ number, message, type: type || 'GENERAL' });
-    console.log(`📥 नया मैसेज क्यू में जुड़ा -> ${number} (कुल कतार: ${messageQueue.length})`);
+    messageQueue.push({ number, message, type: type || 'GENERAL', name, className, session, rid, paid, details });
+    console.log(`📥 नया मैसेज/PDF क्यू में जुड़ा -> ${number} (कुल कतार: ${messageQueue.length})`);
 
     processQueue();
 
@@ -295,12 +359,10 @@ app.listen(3000, () => console.log('Secure VIP Bot running on port 3000'));
 startBot();
 
 // 🔄 Keep-Alive Self Ping (Railway को 24/7 एक्टिव रखने के लिए)
-const https = require('https');
-
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
     }).on('error', (err) => {
         console.error('❌ Self-Ping error:', err.message);
     });
-}, 4 * 60 * 1000); // हर 4 मिनट में खुद को पिंग करेगा
+}, 4 * 60 * 1000);
