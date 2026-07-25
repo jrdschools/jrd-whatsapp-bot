@@ -108,7 +108,7 @@ _नोट: जानकारी केवल पंजीकृत (Registered
         }
 
         if (lowerText === '1') {
-            await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
+            await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें। *`);
             return;
         }
         if (lowerText === '2') {
@@ -359,6 +359,23 @@ app.post('/enqueue-message', (req, res) => {
     processQueue();
 
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
+});
+
+app.post('/send-whatsapp', async (req, res) => {
+    const body = req.body || {};
+    const targetPhone = body.number || body.phone || body.mobile;
+    const message = body.message;
+
+    if (!targetPhone || !message) return res.status(400).json({ status: 'error', message: 'Missing params' });
+
+    try {
+        let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
+        if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
+        await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
+        return res.status(200).json({ status: 'success' });
+    } catch (error) {
+        return res.status(500).json({ status: 'error', message: error.toString() });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
