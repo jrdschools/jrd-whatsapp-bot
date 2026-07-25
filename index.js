@@ -227,7 +227,6 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 🎨 VIP प्रोफाइल कार्ड फ़ंक्शन
 async function sendStudentProfileCard(jid, s) {
     const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*
 🏫 *JRD Public School, Marui*
@@ -242,18 +241,17 @@ async function sendStudentProfileCard(jid, s) {
 👩‍👦 *माता का नाम:* ${s.mother}
 🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})
 
-💰 *भुगतान एवं जमा विवरण:*
-• *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}
+💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}
 
-📊 *मदवार जमा स्थिति:*
+📊 *भुगतान/जमा विवरण:*
 ${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}
 
-⚠️ *चालू माह तक बकाया स्थिति:*
+⚠️ *बकाया शुल्क विवरण:*
 ${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*
-• *चालू सत्र बकाया (2026-27):* ₹${s.current_due || 0}
+• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}
 • *पिछला बकाया (Old Due):* ₹${s.old_due || 0}
 ---------------------------------------
 🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*
