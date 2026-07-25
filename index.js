@@ -105,7 +105,7 @@ _नोट: जानकारी केवल पंजीकृत (Registered
         }
 
         if (lowerText === '1') {
-            await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें। *`);
+            await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
             return;
         }
         if (lowerText === '2') {
@@ -307,8 +307,15 @@ async function processQueue() {
                 await sendFeePdfReceipt(jid, item);
                 console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
             } else {
-                await sock.sendMessage(jid, { text: item.message });
-                console.log(`✅ [${item.type}] मैसेज भेजा गया -> ${formattedNumber}`);
+                // 🛠️ 100% SURESOT FIX: अगर message खाली है तो रसीद ऑटो-जनरेट होगी!
+                let textToSend = item.message;
+                if (!textToSend || textToSend.trim() === '') {
+                    const cleanDet = (item.details || '').replace(/<br>/g, "\n");
+                    textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
+                }
+
+                await sock.sendMessage(jid, { text: textToSend });
+                console.log(`✅ [${item.type}] संदेश भेजा गया -> ${formattedNumber}`);
             }
 
             processedCount++;
@@ -355,10 +362,12 @@ app.post('/send-whatsapp', async (req, res) => {
     }
 });
 
-app.listen(3000, () => console.log('Secure VIP Bot running on port 3000'));
+// 🛠️ PORT DYNAMIC FIX (Railway पर 24/7 चलने के लिए अनिवार्य)
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
-// 🔄 Keep-Alive Self Ping (Railway को 24/7 एक्टिव रखने के लिए)
+// 🔄 Keep-Alive Self Ping (Railway को सोने से बचाने के लिए)
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
