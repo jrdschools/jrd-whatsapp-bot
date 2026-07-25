@@ -307,7 +307,7 @@ async function processQueue() {
                 await sendFeePdfReceipt(jid, item);
                 console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
             } else {
-                // 🛠️ 100% SURESOT FIX: अगर message खाली है तो रसीद ऑटो-जनरेट होगी!
+                // 🛠️ SUREDOT TEXT GENERATOR: खाली संदेश आने पर भी 100% सही रसीद बनेगी
                 let textToSend = item.message;
                 if (!textToSend || textToSend.trim() === '') {
                     const cleanDet = (item.details || '').replace(/<br>/g, "\n");
@@ -315,12 +315,12 @@ async function processQueue() {
                 }
 
                 await sock.sendMessage(jid, { text: textToSend });
-                console.log(`✅ [${item.type}] संदेश भेजा गया -> ${formattedNumber}`);
+                console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
             }
 
             processedCount++;
 
-            const randomDelay = Math.floor(Math.random() * 4000) + 4000;
+            const randomDelay = Math.floor(Math.random() * 3000) + 3000;
             await new Promise(res => setTimeout(res, randomDelay));
 
             if (processedCount % 20 === 0) {
@@ -336,12 +336,31 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
+// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
-    const { number, message, type, name, className, session, rid, paid, details } = req.body;
-    if (!number) return res.status(400).json({ status: 'error', message: 'Missing fields' });
+    const body = req.body || {};
+    
+    // सब तरह के फोन नंबर की नाम-कीज (Name Keys) को स्वीकार करेगा
+    const targetPhone = body.number || body.phone || body.mobile || body.to;
 
-    messageQueue.push({ number, message, type: type || 'GENERAL', name, className, session, rid, paid, details });
-    console.log(`📥 नया मैसेज/PDF क्यू में जुड़ा -> ${number} (कुल कतार: ${messageQueue.length})`);
+    if (!targetPhone) {
+        console.error("❌ Invalid Enqueue Payload: Phone number missing!", body);
+        return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
+    }
+
+    messageQueue.push({
+        number: targetPhone.toString(),
+        message: body.message || "",
+        type: body.type || 'GENERAL',
+        name: body.name || body.student_name || '',
+        className: body.className || body.class || '',
+        session: body.session || '2026-27',
+        rid: body.rid || body.receipt_no || '',
+        paid: body.paid || body.amount || 0,
+        details: body.details || ''
+    });
+
+    console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${targetPhone} (कुल क्यू: ${messageQueue.length})`);
 
     processQueue();
 
@@ -349,16 +368,19 @@ app.post('/enqueue-message', (req, res) => {
 });
 
 app.post('/send-whatsapp', async (req, res) => {
-    const { number, message } = req.body;
-    if (!number || !message) return res.status(400).json({ status: 'error' });
+    const body = req.body || {};
+    const targetPhone = body.number || body.phone || body.mobile;
+    const message = body.message;
+
+    if (!targetPhone || !message) return res.status(400).json({ status: 'error', message: 'Missing params' });
 
     try {
-        let formattedNumber = number.toString().replace(/[^0-9]/g, '');
+        let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
         if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
         await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
         return res.status(200).json({ status: 'success' });
     } catch (error) {
-        return res.status(500).json({ status: 'error' });
+        return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
 
@@ -367,7 +389,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
-// 🔄 Keep-Alive Self Ping (Railway को सोने से बचाने के लिए)
+// 🔄 Keep-Alive Self Ping (Railway को एक्टिव रखने के लिए)
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
