@@ -35,7 +35,7 @@ function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
         }
     } catch (e) {
         console.error('❌ Error clearing Auth Folder:', e.message);
@@ -67,17 +67,19 @@ async function startBot() {
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: false, // 🛡️ Waiting Error Fix: Don't force online on connect
             browser: Browsers.macOS('Desktop'),
             
-            // 🛡️ WAITING ERROR FIX (Signal Sync Settings)
+            // 🛡️ WAITING ERROR FIX (Retry & Handshake Fix)
             msgRetryCounterCache,
-            retryRequestDelayMs: 1500,
+            retryRequestDelayMs: 2000,
             maxMsgRetryCount: 5,
 
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) return messageCache.get(key.id);
-                return { conversation: 'JRD Public School' };
+                if (messageCache.has(key.id)) {
+                    return messageCache.get(key.id);
+                }
+                return { conversation: 'JRD Public School Notification' };
             }
         });
 
@@ -109,7 +111,7 @@ async function startBot() {
                 isConnecting = false;
                 currentQrCode = '';
                 
-                // 🔑 Keys को पूरी तरह सिंक होने के लिए 5 सेकंड का वार्म-अप
+                // 🔑 Keys सिंक होने के लिए 5 सेकंड का वार्म-अप
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
@@ -215,6 +217,7 @@ async function sendReply(jid, text) {
     }
 }
 
+// 📄 OFFICIAL BRANDED SCHOOL PDF RECEIPT
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -373,8 +376,8 @@ async function processQueue() {
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
-                // 2. 1 सेकंड रुक कर PDF
-                await new Promise(res => setTimeout(res, 1000));
+                // 2. 1.5 सेकंड रुक कर PDF
+                await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
                 messageQueue.shift();
