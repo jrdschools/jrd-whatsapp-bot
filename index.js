@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -123,12 +123,13 @@ async function startBot() {
 
         await restoreAuthFolderFromCloud();
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-        const { version } = await fetchLatestBaileysVersion();
-        console.log('ℹ️ WhatsApp Web version इस्तेमाल हो रहा है:', version.join('.'));
+        
+        // 🚀 व्हाट्सएप वेब का लेटेस्ट स्टेबल वर्ज़न (Outdated Version Fix)
+        const latestVersion = [2, 3000, 1017531287];
 
         sock = makeWASocket({
             auth: state,
-            version,
+            version: latestVersion,
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
@@ -137,7 +138,7 @@ async function startBot() {
 
             // 🛡️ WAITING ERROR FIX: री-ट्राई काउंटर और मैसेज डिक्रिप्शन कैश
             msgRetryCounterCache,
-            retryRequestDelayMs: 250,
+            retryRequestDelayMs: 500,
             maxMsgRetryCount: 5,
 
             getMessage: async (key) => {
@@ -167,7 +168,7 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | دوبارہ कनेक्ट करें:', shouldReconnect);
+                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '| Reconnect:', shouldReconnect);
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 5000);
                 } else {
@@ -179,13 +180,13 @@ async function startBot() {
                 scheduleAuthBackup();
                 backupAuthFolderToCloud();
 
-                // 🛡️ WAITING FIX: सिग्नल कीज़ सिंक होने के लिए 5 सेकंड का वार्म-अप समय
+                // 🛡️ WAITING FIX: सिग्नल कीज़ सिंक होने के लिए वार्म-अप समय
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' JRD Enterprise VIP Bot Active & Secured! ');
+                    console.log(' JRD VIP Bot Active (Latest Version Connected) ');
                     console.log('=============================================\n');
-                }, 5000);
+                }, 3000);
             }
         });
 
@@ -208,7 +209,7 @@ async function startBot() {
 
             // 🎯 1. हेल्प एवं वेलकम मेन्यू
             if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
-                const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें।\nउदा: *#Aditya* या *#EN12345*\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
+                const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
                 await sendReply(jid, menuText);
                 return;
             }
@@ -236,14 +237,12 @@ async function startBot() {
 
             if (!hasHashTag) {
                 if (casualWords.some(word => lowerText.includes(word))) {
-                    await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए उसका **नाम** या **Enrolment No** आगे **#** लगाकर भेजें (उदा: *#Aditya*)। मुख्य मेन्यू के लिए **Menu** लिखें।`);
+                    await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए उसका **नाम** लिखकर भेजें (उदा: *Aditya*)। मुख्य मेन्यू के लिए **Menu** लिखें।`);
                     return;
                 }
-                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nबच्चे की फीस/प्रोफाइल डिटेल देखने के लिए उसका **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें (उदा: *#Aditya* या *#EN12345*)।\n\nमुख्य मेन्यू के लिए **Menu** लिखें।`);
-                return;
             }
 
-            // 🔍 3. # TAG के साथ खोज
+            // 🔍 3. छात्र प्रोफाइल खोज
             const query = rawText.replace(/#/g, '').trim();
             if (query.length >= 2) {
                 try {
@@ -257,13 +256,11 @@ async function startBot() {
                         await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है。\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है。\n_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
                     }
                     else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
-                        await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम *"${query}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया。\n\nकृपया सही नाम अथवा Enrolment No # के साथ लिखकर भेजें (उदा: *#Aditya*)।`);
+                        await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम *"${query}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया。\n\nकृपया सही नाम अथवा Enrolment No लिखकर भेजें (उदा: *Aditya*)।`);
                     }
                 } catch (error) {
                     console.error('Database Search Error:', error.message);
                 }
-            } else {
-                await sendReply(jid, `कृपया # के बाद बच्चे का **नाम** या **Enrolment No** भी लिखें। उदा: *#Aditya*`);
             }
         });
 
@@ -299,7 +296,7 @@ async function sendFeePdfReceipt(jid, data) {
                 const pdfBuffer = Buffer.concat(buffers);
 
                 if (sock && isBotReady) {
-                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद।`;
+                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद (PDF)।`;
                     const sent = await sock.sendMessage(jid, {
                         document: pdfBuffer,
                         mimetype: 'application/pdf',
@@ -353,7 +350,6 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -392,23 +388,25 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (sock && (isBotReady || sock.user)) {
-                // PDF_RECEIPT या FEE_RECEIPT दोनों पे-लोड हैंडल होंगे
-                if (item.type === 'PDF_RECEIPT' || item.type === 'FEE_RECEIPT') {
-                    await sendFeePdfReceipt(jid, item);
-                    console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
-                } else {
-                    let textToSend = item.message;
-                    if (!textToSend || textToSend.trim() === '') {
-                        const cleanDet = (item.details || '').replace(/<br>/g, "\n");
-                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
-                    }
-
-                    const sent = await sock.sendMessage(jid, { text: textToSend });
-                    if (sent && sent.key && sent.key.id) {
-                        messageCache.set(sent.key.id, { conversation: textToSend });
-                    }
-                    console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
+                
+                // 🎯 1. पूरा टेक्स्ट मैसेज (पूरे बहीखाता विवरण के साथ) जाएगा
+                let cleanDet = (item.details || '').replace(/<br>/g, "\n");
+                let textToSend = item.message;
+                
+                if (!textToSend || textToSend.trim() === '') {
+                    textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
+
+                // टेक्स्ट मैसेज भेजें
+                const sent = await sock.sendMessage(jid, { text: textToSend });
+                if (sent && sent.key && sent.key.id) {
+                    messageCache.set(sent.key.id, { conversation: textToSend });
+                }
+                console.log(`✅ [TEXT MSG] भेजा गया -> ${formattedNumber}`);
+
+                // 🎯 2. साथ में PDF रसीद भी जाएगी
+                await sendFeePdfReceipt(jid, item);
+                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
 
                 messageQueue.shift();
             } else {
@@ -417,7 +415,7 @@ async function processQueue() {
                 break;
             }
 
-            await new Promise(res => setTimeout(res, 1500));
+            await new Promise(res => setTimeout(res, 2000));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
