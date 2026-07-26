@@ -35,35 +35,28 @@ let isConnecting = false;
 function extractClean10DigitPhone(jid, msg) {
     try {
         let rawJid = '';
-        
-        // 1. यदि participant मौजूद हो (ग्रुप या LID केस में)
         if (msg && msg.key && msg.key.participant) {
             rawJid = msg.key.participant;
         } else {
             rawJid = jid || '';
         }
 
-        // केवल संख्याएँ निकालें
         let numStr = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
 
-        // यदि 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
         if (numStr.length === 12 && numStr.startsWith('91')) {
             return numStr.substring(2);
         }
 
-        // यदि शुद्ध 10-अंकों का भारतीय नंबर है (6,7,8,9 से शुरू होने वाला)
         if (numStr.length === 10 && /^[6-9]/.test(numStr)) {
             return numStr;
         }
 
-        // यदि JID में LID आ गया हो, तो alternative remoteJid से ढूँढें
         if (msg && msg.key && msg.key.remoteJid) {
             let altStr = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
             if (altStr.length === 12 && altStr.startsWith('91')) return altStr.substring(2);
             if (altStr.length === 10 && /^[6-9]/.test(altStr)) return altStr;
         }
 
-        // बैकअप लॉजिक
         if (numStr.length > 10) {
             let matches = numStr.match(/[6-9]\d{9}/);
             if (matches && matches[0]) return matches[0];
@@ -79,7 +72,7 @@ function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
         }
     } catch (e) {
         console.error('❌ Error clearing Auth Folder:', e.message);
@@ -87,15 +80,16 @@ function clearAuthFolder() {
 }
 
 async function startBot() {
-    if (isConnecting) return;
-    isConnecting = true;
-
     try {
         if (sock) {
-            try { sock.ev.removeAllListeners(); } catch (e) {}
+            try { 
+                sock.ev.removeAllListeners(); 
+                sock.end(undefined);
+            } catch (e) {}
             sock = null;
         }
 
+        isConnecting = true;
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
@@ -135,12 +129,14 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
 
+                console.log('⚠️ कनेक्शन बंद हुआ | StatusCode:', statusCode);
+
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log('❌ सेशन लॉगआउट हुआ। नया QR जनरेट हो रहा है...');
                     clearAuthFolder();
-                    setTimeout(() => startBot(), 2000);
+                    setTimeout(() => startBot(), 1500);
                 } else {
-                    setTimeout(() => startBot(), 3000);
+                    setTimeout(() => startBot(), 2500);
                 }
             } else if (connection === 'open') {
                 isConnecting = false;
@@ -149,7 +145,7 @@ async function startBot() {
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Active & Phone Extractor Fixed! ');
+                    console.log(' 🎉 JRD VIP Bot Active & E2EE / Phone Fixed! ');
                     console.log('=============================================\n');
                 }, 3000);
             }
@@ -165,12 +161,11 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 शुद्ध 10-अंकों का असली मोबाइल नंबर निकाला जा रहा है
             const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | निष्पादित शुद्ध मोबाइल नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+            console.log(`📱 मैसेज आया | शुद्ध मोबाइल: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
@@ -371,6 +366,7 @@ app.get('/qr', (req, res) => {
     `);
 });
 
+// 🔄 इमरजेंसी फ्रेश QR रीसेट राउट
 app.get('/reset-qr', (req, res) => {
     clearAuthFolder();
     isBotReady = false;
@@ -406,11 +402,9 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. टेक्स्ट मैसेज
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
-                // 2. PDF रसीद
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
