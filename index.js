@@ -48,6 +48,43 @@ function forceClearAuthFolder() {
     }
 }
 
+// 🎯 असली 10-अंकों का भारतीय मोबाइल नंबर निकालने का सटीक लॉजिक
+function extractGuardianPhone(jid, msg) {
+    try {
+        let sources = [];
+        if (msg?.key?.participant) sources.push(msg.key.participant);
+        if (msg?.key?.remoteJid) sources.push(msg.key.remoteJid);
+        if (jid) sources.push(jid);
+
+        for (let src of sources) {
+            let clean = src.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+            
+            // 1. यदि 12 डिजिट है और 91 से चालू हो रहा है (उदा: 919792649799)
+            if (clean.length === 12 && clean.startsWith('91')) {
+                let p = clean.substring(2);
+                if (/^[6-9]\d{9}$/.test(p)) return p;
+            }
+
+            // 2. यदि शुद्ध 10 अंकों का मोबाइल नंबर है (6,7,8,9 से शुरू)
+            if (clean.length === 10 && /^[6-9]\d{9}$/.test(clean)) {
+                return clean;
+            }
+
+            // 3. यदि स्ट्रिंग बड़ी है, तो उसमें से भारतीय मोबाइल नंबर फॉर्मेट खोजें
+            let match = clean.match(/[6-9]\d{9}/);
+            if (match && match[0]) {
+                return match[0];
+            }
+        }
+
+        // फॉलबैक
+        let fallback = jid.split('@')[0].replace(/[^0-9]/g, '');
+        return fallback.slice(-10);
+    } catch (e) {
+        return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+    }
+}
+
 async function startBot() {
     if (isConnecting) return;
     isConnecting = true;
@@ -69,7 +106,7 @@ async function startBot() {
             printQRInTerminal: false,
             syncFullHistory: false,
             markOnlineOnConnect: true,
-            browser: Browsers.ubuntu('Chrome'), // Fast QR generation signature
+            browser: Browsers.ubuntu('Chrome'),
             
             msgRetryCounterCache,
             retryRequestDelayMs: 1000,
@@ -110,7 +147,7 @@ async function startBot() {
                 currentQrCode = '';
                 isBotReady = true;
                 console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP Bot Active & Connected! ');
+                console.log(' 🎉 JRD VIP Bot Active & Clean Code Ready! ');
                 console.log('=============================================\n');
             }
         });
@@ -125,24 +162,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 गार्जियन के मोबाइल नंबर का सीधा 10-अंक एक्सट्रैक्शन
-// 🎯 LID / कचरा ID हटाकर असली 10-डिजिट मोबाइल नंबर पकड़ना
-let rawJid = msg.key.participant || msg.key.remoteJid || jid || '';
-let cleanDigits = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-
-let senderPhone = '';
-if (cleanDigits.length === 12 && cleanDigits.startsWith('91')) {
-    senderPhone = cleanDigits.substring(2); // '91' हटाकर शुद्ध 10 अंक देगा -> 9792649799
-} else if (cleanDigits.length > 10) {
-    let match = cleanDigits.match(/[6-9]\d{9}/);
-    senderPhone = match ? match[0] : cleanDigits.slice(-10);
-} else {
-    senderPhone = cleanDigits;
-}           
+            // 🎯 गार्जियन के मोबाइल नंबर का शुद्ध 10-अंक एक्सट्रैक्शन
+            const senderPhone = extractGuardianPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | [${senderPhone}] : "${rawText}"`);
+            console.log(`📱 मैसेज आया | निष्पादित असली नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
