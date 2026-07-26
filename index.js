@@ -26,6 +26,7 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = AUTH_BACKUP_SCRIPT_URL;
 
+// 🔑 "Waiting for this message" रोकने के लिए मैपिंग व री-ट्राई कैश
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
@@ -34,6 +35,7 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
+// 📦 बैकग्राउंड में पूरे auth_info_baileys फ़ोल्डर का ZIP बनाकर Cloud में बैकअप लेना
 async function backupAuthFolderToCloud() {
     try {
         if (!fs.existsSync(AUTH_FOLDER) || fs.readdirSync(AUTH_FOLDER).length === 0) return;
@@ -59,14 +61,21 @@ async function backupAuthFolderToCloud() {
                 value: base64Zip
             }, { timeout: 15000 });
 
-            console.log('☁️ Auth Folder Backup Saved to Cloud');
+            console.log('☁️ पूरा auth_info_baileys फ़ोल्डर (ZIP) क्लाउड में बैकअप हो गया।');
             try { fs.unlinkSync(zipPath); } catch (e) {}
         }
     } catch (err) {
-        console.error('⚠️ Backup error:', err.message);
+        console.error('❌ Auth folder backup error:', err.message);
     }
 }
 
+let backupTimer = null;
+function scheduleAuthBackup() {
+    if (backupTimer) return;
+    backupTimer = setInterval(backupAuthFolderToCloud, 60 * 1000);
+}
+
+// 🚀 WhatsApp Bot Engine (Instant QR Generation + Latest Version + macOS Desktop Signature)
 async function startBot() {
     if (isConnecting) return;
     isConnecting = true;
@@ -80,19 +89,27 @@ async function startBot() {
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
+        // 🚀 व्हाट्सएप वेब का लेटेस्ट स्टेबल वर्ज़न (Outdated Version Fix)
+        const latestVersion = [2, 3000, 1017531287];
+
         sock = makeWASocket({
             auth: state,
-            version: [2, 3000, 1017531287],
+            version: latestVersion,
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
             markOnlineOnConnect: true,
-            browser: Browsers.macOS('Desktop'),
+            browser: Browsers.macOS('Desktop'), // लेटेस्ट डेस्कटॉप ब्राउज़र क्लाइंट Signature
+
+            // 🛡️ WAITING ERROR FIX: री-ट्राई काउंटर और मैसेज डिक्रिप्शन कैश
             msgRetryCounterCache,
             retryRequestDelayMs: 500,
             maxMsgRetryCount: 5,
+
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) return messageCache.get(key.id);
+                if (messageCache.has(key.id)) {
+                    return messageCache.get(key.id);
+                }
                 return { conversation: 'JRD Public School' };
             }
         });
@@ -108,7 +125,7 @@ async function startBot() {
             if (qr) {
                 currentQrCode = qr;
                 isConnecting = false;
-                console.log('✅ 🔥 नया QR Code जनरेट हो गया!');
+                console.log('✅ 🔥 नया QR Code जनरेट हो गया! /qr पर जाकर तुरंत स्कैन करें।');
                 qrcodeTerminal.generate(qr, { small: true });
             }
 
@@ -117,10 +134,11 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
+                console.log('⚠️ कनेक्शन बंद हुआ | Reconnect:', shouldReconnect);
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 3000);
                 } else {
+                    console.log('❌ Session Logged Out. auth_info_baileys फ़ोल्डर साफ किया जा रहा है...');
                     try {
                         if (fs.existsSync(AUTH_FOLDER)) {
                             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
@@ -132,14 +150,15 @@ async function startBot() {
                 isConnecting = false;
                 currentQrCode = '';
                 isBotReady = true;
+                scheduleAuthBackup();
                 backupAuthFolderToCloud();
                 console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP Bot Active & Connected! ');
+                console.log(' 🎉 JRD VIP Bot Active & Connected (Latest Web Version)! ');
                 console.log('=============================================\n');
             }
         });
 
-        // 📩 मैसेज रिसिविंग नियम (Strict Security Logic)
+        // 📩 मैसेज रिसिविंग नियम (Strict Security & Menu Logic)
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             const msg = messages[0];
@@ -154,9 +173,9 @@ async function startBot() {
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | [${senderPhone}] : "${rawText}"`);
+            console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${rawText}"`);
 
-            // 1. वेलकम मेन्यू
+            // 🎯 1. हेल्प एवं वेलकम मेन्यू
             if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
                 const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम या रोल नंबर के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
                 await sendReply(jid, menuText);
@@ -180,7 +199,7 @@ async function startBot() {
                 return;
             }
 
-            // 2. अगर बिना # के कोई सामान्य मैसेज आता है -> सिर्फ गाइड/वेलकम SMS जाएगा
+            // 💬 2. अगर बिना # के कोई सामान्य मैसेज आता है -> केवल गाइड/वेलकम SMS जाएगा
             const hasHashTag = rawText.includes('#');
 
             if (!hasHashTag) {
@@ -188,7 +207,7 @@ async function startBot() {
                 return;
             }
 
-            // 3. केवल # लगाने पर ही डेटाबेस सर्च होगा (और पंजीकृत नंबर चेक होगा)
+            // 🔍 3. केवल # लगाने पर ही डेटाबेस सर्च होगा (और पंजीकृत नंबर चेक होगा)
             const query = rawText.replace(/#/g, '').trim();
             if (query.length >= 2) {
                 try {
@@ -197,9 +216,11 @@ async function startBot() {
 
                     if (response.data && response.data.status === 'success') {
                         await sendStudentProfileCard(jid, response.data.data);
-                    } else if (response.data && response.data.status === 'unregistered_number') {
+                    }
+                    else if (response.data && response.data.status === 'unregistered_number') {
                         await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।`);
-                    } else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
+                    }
+                    else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
                         await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम *"${query}"* आपके पंजीकृत मोबाइल नंबर से जुड़ा हुआ नहीं पाया गया।`);
                     }
                 } catch (error) {
@@ -216,17 +237,21 @@ async function startBot() {
     }
 }
 
+// ✉️ रिप्लाई भेजने का हेल्पर
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
             const sent = await sock.sendMessage(jid, { text });
-            if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: text });
+            if (sent?.key?.id) {
+                messageCache.set(sent.key.id, { conversation: text });
+            }
         }
     } catch (err) {
         console.error('❌ रिप्लाई भेजने में त्रुटि:', err.message);
     }
 }
 
+// 📄 PDF रसीद जनरेट करके भेजने वाला फ़ंक्शन
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -236,6 +261,7 @@ async function sendFeePdfReceipt(jid, data) {
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', async () => {
                 const pdfBuffer = Buffer.concat(buffers);
+
                 if (sock && isBotReady) {
                     const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद (PDF)।`;
                     const sent = await sock.sendMessage(jid, {
@@ -291,12 +317,13 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
+// 🌐 QR कोड Endpoint (1-2 सेकंड में नया QR देने वाला)
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
     }
     if (!currentQrCode) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें।</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh (F5) करें।</h2>');
     }
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQrCode)}`;
     res.send(`
@@ -304,14 +331,16 @@ app.get('/qr', (req, res) => {
             <h2>🏫 JRD Public School WhatsApp Bot</h2>
             <p>अपने व्हाट्सएप से इस QR कोड को स्कैन करें:</p>
             <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 2px solid #333; padding: 10px; border-radius: 10px; width: 300px; height: 300px;"/>
+            <p><i>स्कैन करने के बाद इस पेज को बंद कर सकते हैं।</i></p>
         </div>
     `);
 });
 
 app.get('/', (req, res) => {
-    res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
+    res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
+// 🛡️ DUAL-DELIVERY MESSAGE QUEUE ENGINE (TEXT + PDF IN SINGLE TRIGGER)
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -327,22 +356,27 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (sock && (isBotReady || sock.user)) {
+                
+                // 🎯 1. पहले पूरा टेक्स्ट मैसेज (बहीखाता विवरण/ब्रेकडाउन) जाएगा
                 let cleanDet = (item.details || '').replace(/<br>/g, "\n");
                 let textToSend = item.message;
-
+                
                 if (!textToSend || textToSend.trim() === '') {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. टेक्स्ट मैसेज
+                // टेक्स्ट मैसेज भेजें
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
+                console.log(`✅ [TEXT MSG] भेजा गया -> ${formattedNumber}`);
 
-                // 2. साथ ही PDF रसीद
+                // 🎯 2. साथ ही PDF रसीद भी डिलीवर होगी
                 await sendFeePdfReceipt(jid, item);
+                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
 
                 messageQueue.shift();
             } else {
+                console.log('⚠️ बॉट सिंक हो रहा है, 2 सेकंड बाद पुनः प्रयास करेगा...');
                 await new Promise(res => setTimeout(res, 2000));
                 break;
             }
@@ -358,11 +392,13 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
+// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
 
     if (!targetPhone) {
+        console.error("❌ Invalid Enqueue Payload: Phone number missing!", body);
         return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
     }
 
@@ -377,6 +413,8 @@ app.post('/enqueue-message', (req, res) => {
         paid: body.paid || body.amount || 0,
         details: body.details || ''
     });
+
+    console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${targetPhone} (कुल क्यू: ${messageQueue.length})`);
 
     processQueue();
 
@@ -403,13 +441,15 @@ app.post('/send-whatsapp', async (req, res) => {
     }
 });
 
+// 🛠️ PORT DYNAMIC FIX
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
+// 🔄 Keep-Alive Self Ping
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
-        console.log('⚡ Self-Ping successful');
+        console.log('⚡ Self-Ping successful: Server is active');
     }).on('error', (err) => {
         console.error('❌ Self-Ping error:', err.message);
     });
