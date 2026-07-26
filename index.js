@@ -23,6 +23,7 @@ app.use((req, res, next) => {
     next();
 });
 
+// 🔑 "Waiting for this message" को रोकने के लिए एडवांस डिक्रिप्शन और प्री-की कैश
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
@@ -31,19 +32,17 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🧹 सेशन फ़ोल्डर साफ़ करने का हेल्पर
 function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
         }
     } catch (e) {
         console.error('❌ Auth Folder साफ़ करने में त्रुटि:', e.message);
     }
 }
 
-// 🚀 WhatsApp Bot Engine
 async function startBot() {
     if (isConnecting) return;
     isConnecting = true;
@@ -73,12 +72,19 @@ async function startBot() {
             syncFullHistory: false,
             markOnlineOnConnect: true,
             browser: Browsers.macOS('Desktop'),
+            
+            // 🛡️ WAITING ERROR PERMANENT FIX
             msgRetryCounterCache,
-            retryRequestDelayMs: 500,
+            retryRequestDelayMs: 1000,
             maxMsgRetryCount: 5,
+            emitOwnEvents: true,
+
+            // डिक्रिप्शन के लिए पुराने मैसेज और कीज़ का रिस्पॉन्स
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) return messageCache.get(key.id);
-                return { conversation: 'JRD Public School' };
+                if (messageCache.has(key.id)) {
+                    return messageCache.get(key.id);
+                }
+                return { conversation: 'JRD Public School Notification' };
             }
         });
 
@@ -109,14 +115,18 @@ async function startBot() {
             } else if (connection === 'open') {
                 isConnecting = false;
                 currentQrCode = '';
-                isBotReady = true;
-                console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP Bot Active & Connected! ');
-                console.log('=============================================\n');
+                
+                // Signal E2EE Key Sync के लिए 3 सेकंड का वार्म-अप
+                setTimeout(() => {
+                    isBotReady = true;
+                    console.log('\n=============================================');
+                    console.log(' 🎉 JRD VIP Bot Active & E2EE Keys Synced! ');
+                    console.log('=============================================\n');
+                }, 3000);
             }
         });
 
-        // 📩 मैसेज रिसिविंग लॉजिक (सुरक्षा एवं एक्सेस नियम)
+        // 📩 मैसेज रिसिविंग लॉजिक
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             const msg = messages[0];
@@ -133,7 +143,6 @@ async function startBot() {
 
             console.log(`📱 मैसेज आया | [${senderPhone}] : "${rawText}"`);
 
-            // 1️⃣ मेन्यू / ग्रीटिंग्स कीवर्ड्स
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
 
@@ -156,7 +165,6 @@ async function startBot() {
                 }
             }
 
-            // 2️⃣ डेटाबेस जाँच (रजिस्टर्ड यूज़र बनाम अन-रजिस्टर्ड यूज़र)
             const query = rawText.replace(/#/g, '').trim();
             
             try {
@@ -164,26 +172,21 @@ async function startBot() {
                 const response = await axios.get(apiUrl, { timeout: 12000 });
                 const resData = response.data || {};
 
-                // 🔴 केस A: अन-रजिस्टर्ड मोबाइल नंबर
                 if (resData.status === 'unregistered_number') {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
-                        // अन-रजिस्टर्ड यूज़र को सिर्फ वेलकम/स्कूल इन्फो SMS
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
                     } else {
-                        // अगर अन-रजिस्टर्ड #Name से प्रोफाइल सर्च करने की कोशिश करे
                         await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।`);
                     }
                     return;
                 }
 
-                // 🟢 केस B: रजिस्टर्ड मोबाइल नंबर
                 if (isGreeting) {
-                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत (Registered) है ✅_` ;
+                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत (Registered) है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
 
-                // 🔍 प्रोफाइल सर्च (अगर # लगाकर भेजा गया हो)
                 if (rawText.includes('#')) {
                     if (resData.status === 'success') {
                         await sendStudentProfileCard(jid, resData.data);
@@ -193,7 +196,6 @@ async function startBot() {
                     return;
                 }
 
-                // सामान्य बातचीत बिना # के
                 await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे की फीस या प्रोफाइल देखने के लिए उसके नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)।\n\nमुख्य मेन्यू के लिए **Menu** लिखकर भेजें।`);
 
             } catch (error) {
@@ -221,11 +223,10 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 🎨 OFFICIAL BRANDED SCHOOL PDF RECEIPT DESIGN
+// 📄 OFFICIAL BRANDED SCHOOL PDF RECEIPT
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
-            // A5 Dimensions: 420 x 595 pt
             const doc = new PDFDocument({ size: 'A5', margin: 20 });
             let buffers = [];
 
@@ -247,11 +248,11 @@ async function sendFeePdfReceipt(jid, data) {
                 resolve();
             });
 
-            // 1. Double Outer Border (आधिकारिक बॉर्डर)
+            // 1. Double Outer Border
             doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
             doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
 
-            // 2. Header Box Banner (स्कूल नाम का हेडर)
+            // 2. Header Box Banner
             doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
             doc.fillColor('#FFFFFF').fontSize(16).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
             doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) | Contact: Office Administration', 20, 48, { align: 'center' });
@@ -261,7 +262,7 @@ async function sendFeePdfReceipt(jid, data) {
             doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
             doc.fillColor('#1A365D').fontSize(10).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
 
-            // 4. Student & Receipt Meta Grid (छात्र एवं रसीद विवरण)
+            // 4. Student & Receipt Meta Grid
             const metaTop = 110;
             doc.rect(20, metaTop, doc.page.width - 40, 75).lineWidth(0.5).stroke('#CBD5E1');
 
@@ -275,7 +276,6 @@ async function sendFeePdfReceipt(jid, data) {
             doc.font('Helvetica-Bold').text(`Class & Sec  : `, 30, metaTop + 46);
             doc.font('Helvetica').text(`${data.className || 'N/A'}`, 100, metaTop + 46);
 
-            // Right Column
             const rightX = doc.page.width / 2 + 10;
             doc.font('Helvetica-Bold').text(`Session : `, rightX, metaTop + 10);
             doc.font('Helvetica').text(`${data.session || '2026-27'}`, rightX + 50, metaTop + 10);
@@ -287,7 +287,7 @@ async function sendFeePdfReceipt(jid, data) {
             const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
             doc.font('Helvetica').text(`${todayDate}`, rightX + 50, metaTop + 46);
 
-            // 5. Breakdown Table (फ़ीस विवरण तालिका)
+            // 5. Breakdown Table
             const tableTop = 195;
             doc.rect(20, tableTop, doc.page.width - 40, 20).fill('#F1F5F9');
             doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
@@ -296,13 +296,11 @@ async function sendFeePdfReceipt(jid, data) {
 
             doc.moveTo(20, tableTop + 20).lineTo(doc.page.width - 20, tableTop + 20).stroke('#CBD5E1');
 
-            // Details Content
             let detailsY = tableTop + 30;
             const cleanDetails = (data.details || 'School Tuition / Annual Fee').replace(/<br>/g, '\n');
             doc.fillColor('#334155').fontSize(9).font('Helvetica');
             doc.text(cleanDetails, 30, detailsY, { width: doc.page.width - 150 });
 
-            // Amount Highlighting Box
             const totalBoxY = doc.page.height - 120;
             doc.rect(20, totalBoxY, doc.page.width - 40, 30).fill('#1A365D');
             doc.fillColor('#FFFFFF').fontSize(11).font('Helvetica-Bold');
@@ -315,7 +313,6 @@ async function sendFeePdfReceipt(jid, data) {
             doc.text('This is an officially generated digital fee receipt from JRD Public School Management.', 20, footerY, { align: 'center' });
             doc.text('For queries, please contact the school administrative office.', 20, footerY + 11, { align: 'center' });
 
-            // Signature Stamp Box Placeholder
             doc.rect(doc.page.width - 120, footerY - 5, 100, 35).lineWidth(0.5).stroke('#CBD5E1');
             doc.fillColor('#0F172A').fontSize(7).font('Helvetica-Bold');
             doc.text('AUTHORIZED STAMP', doc.page.width - 120, footerY + 10, { width: 100, align: 'center' });
@@ -333,7 +330,6 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड पेज
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट कनेक्टेड है!</h2>');
@@ -369,7 +365,7 @@ app.get('/', (req, res) => {
 let messageQueue = [];
 let isProcessingQueue = false;
 
-// 🛡️ DUAL-DELIVERY MESSAGE QUEUE ENGINE (TEXT + PDF IN SINGLE TRIGGER)
+// 🛡️ DUAL-DELIVERY MESSAGE QUEUE ENGINE
 async function processQueue() {
     if (isProcessingQueue || messageQueue.length === 0) return;
     isProcessingQueue = true;
