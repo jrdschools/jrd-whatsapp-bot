@@ -22,6 +22,9 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
+// 🔑 "Waiting for this message" को जड़ से खत्म करने के लिए मैसेज कैश स्टोरेज
+const messageCache = new Map();
+
 let sock;
 let currentQrCode = '';
 let isBotReady = false;
@@ -38,12 +41,14 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         syncFullHistory: false,
+        markOnlineOnConnect: true,
         browser: ['JRD School Bot', 'Chrome', '1.0.0'],
-        // 🔑 "Waiting for this message" फ़िक्स: खाली मैसेज रिस्पॉन्स हैंडलर
+        // 🔑 असली मैसेज री-ट्राई हेंडलर (Waiting Error Fix)
         getMessage: async (key) => {
-            return {
-                conversation: 'JRD Public School Notification'
-            };
+            if (messageCache.has(key.id)) {
+                return messageCache.get(key.id);
+            }
+            return { conversation: 'JRD Public School Notification' };
         }
     });
 
@@ -178,11 +183,14 @@ _यदि आपने नया नंबर लिया है, तो क�
     });
 }
 
-// ✉️ सामान्य रिप्लाई भेजने का हेल्पर
+// ✉️ सामान्य रिप्लाई भेजने का हेल्पर (कैश के साथ)
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
-            await sock.sendMessage(jid, { text });
+            const sent = await sock.sendMessage(jid, { text });
+            if (sent && sent.key && sent.key.id) {
+                messageCache.set(sent.key.id, { conversation: text });
+            }
         }
     } catch (err) {
         console.error('❌ रिप्लाई भेजने में त्रुटि:', err.message);
@@ -201,12 +209,16 @@ async function sendFeePdfReceipt(jid, data) {
                 const pdfBuffer = Buffer.concat(buffers);
 
                 if (sock && isBotReady) {
-                    await sock.sendMessage(jid, {
+                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद।`;
+                    const sent = await sock.sendMessage(jid, {
                         document: pdfBuffer,
                         mimetype: 'application/pdf',
                         fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf`,
-                        caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद।`
+                        caption: captionText
                     });
+                    if (sent && sent.key && sent.key.id) {
+                        messageCache.set(sent.key.id, { documentMessage: { caption: captionText, fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf` } });
+                    }
                 }
                 resolve();
             });
@@ -303,7 +315,7 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE (100% RELIABLE DELIVERY FIX)
+// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -312,13 +324,12 @@ async function processQueue() {
     isProcessingQueue = true;
 
     while (messageQueue.length > 0) {
-        const item = messageQueue[0]; // पहले संदेश को पढ़ें
+        const item = messageQueue[0];
         try {
             let formattedNumber = item.number.toString().replace(/[^0-9]/g, '');
             if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
             const jid = formattedNumber + '@s.whatsapp.net';
 
-            // यदि सॉकेट और बॉट तैयार हैं तो तुरंत भेजें
             if (sock && (isBotReady || sock.user)) {
                 if (item.type === 'PDF_RECEIPT') {
                     await sendFeePdfReceipt(jid, item);
@@ -330,13 +341,16 @@ async function processQueue() {
                         textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                     }
 
-                    await sock.sendMessage(jid, { text: textToSend });
+                    const sent = await sock.sendMessage(jid, { text: textToSend });
+                    if (sent && sent.key && sent.key.id) {
+                        messageCache.set(sent.key.id, { conversation: textToSend });
+                    }
                     console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
                 }
                 
-                messageQueue.shift(); // सफल होने पर क्यू से निकालें
+                messageQueue.shift();
             } else {
-                console.log('⚠️ बॉट अभी व्हाट्सएप से सिंक हो रहा है, 2 सेकंड बाद पुनः प्रयास करेगा...');
+                console.log('⚠️ बॉट सिंक हो रहा है, 2 सेकंड बाद पुनः प्रयास करेगा...');
                 await new Promise(res => setTimeout(res, 2000));
                 break;
             }
@@ -345,18 +359,16 @@ async function processQueue() {
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
-            messageQueue.shift(); // एरर आने पर भी अगले मैसेज के लिए शिफ्ट करें
+            messageQueue.shift();
         }
     }
 
     isProcessingQueue = false;
 }
 
-// 🎯 FLEXIBLE RECEIVER ENDPOINT (GAS व PHP दोनों से कॉल स्वीकार करेगा)
+// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
-    
-    // सब तरह के फोन नंबर की नाम-कीज (Name Keys) को स्वीकार करेगा
     const targetPhone = body.number || body.phone || body.mobile || body.to;
 
     if (!targetPhone) {
@@ -378,7 +390,6 @@ app.post('/enqueue-message', (req, res) => {
 
     console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${targetPhone} (कुल क्यू: ${messageQueue.length})`);
 
-    // तत्काल क्यू प्रोसेसिंग चालू करें
     processQueue();
 
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
@@ -396,19 +407,22 @@ app.post('/send-whatsapp', async (req, res) => {
 
         let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
         if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
-        await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
+        const sent = await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
+        if (sent && sent.key && sent.key.id) {
+            messageCache.set(sent.key.id, { conversation: message });
+        }
         return res.status(200).json({ status: 'success' });
     } catch (error) {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
 
-// 🛠️ PORT DYNAMIC FIX (Railway पर 24/7 चलने के लिए अनिवार्य)
+// 🛠️ PORT DYNAMIC FIX
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
-// 🔄 Keep-Alive Self Ping (Railway को एक्टिव रखने के लिए)
+// 🔄 Keep-Alive Self Ping
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
