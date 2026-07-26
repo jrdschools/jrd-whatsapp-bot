@@ -10,11 +10,9 @@ const path = require('path');
 
 const app = express();
 
-// 🚀 Rate Limiting और Payload Lock हटाने के लिए बॉडी पार्सर
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// CORS और हेडर अलाउ करने के लिए
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -27,7 +25,31 @@ let sock;
 let currentQrCode = '';
 let isBotReady = false;
 
-// 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना
+// 🛑 डबल एसएमएस रोकने के लिए रीसेंट मैसेज ट्रैकर (Deduplication Cache)
+const processedMessagesCache = new Map();
+
+function isDuplicateMessage(phone, keyContent) {
+    const uniqueKey = `${phone}_${keyContent}`;
+    const now = Date.now();
+
+    if (processedMessagesCache.has(uniqueKey)) {
+        const lastSentTime = processedMessagesCache.get(uniqueKey);
+        // अगर 30 सेकंड के अंदर वही सेम मैसेज दोबारा आया, तो उसे डबल माना जाएगा
+        if (now - lastSentTime < 30000) {
+            return true;
+        }
+    }
+
+    processedMessagesCache.set(uniqueKey, now);
+
+    // मैमोरी साफ रखने के लिए 1 मिनट बाद कैशे से हटाएं
+    setTimeout(() => {
+        processedMessagesCache.delete(uniqueKey);
+    }, 60000);
+
+    return false;
+}
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -83,7 +105,6 @@ async function startBot() {
         }
     });
 
-    // 📩 आने वाले मैसेज हैंडल करना
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
@@ -102,25 +123,8 @@ async function startBot() {
 
         console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
 
-        // 🎯 1. हेल्प एवं वेलकम मेन्यू
         if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
-            const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*
-📍 *मरुई, वाराणसी (उ.प्र.)*
-━━━━━━━━━━━━━━━━━━━━━━━
-🙏 *अभिभावक डिजिटल सेवा केंद्र*
-
-सूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:
-
-1️⃣ *नया एडमिशन (सत्र 2026-27)*
-2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*
-3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*
-4️⃣ *विद्यालय का पता व लोकेशन*
-
-🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*
-बस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।
-
-_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_
-━━━━━━━━━━━━━━━━━━━━━━━`;
+            const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें。\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
             await sendReply(jid, menuText);
             return;
         }
@@ -138,22 +142,16 @@ _नोट: जानकारी केवल पंजीकृत (Registered
             return;
         }
         if (lowerText === '4') {
-            await sendReply(jid, `📍 *विद्यालय लोकेशन:*
-JRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)
-
-🗺 *गूगल मैप्स पर ढूँढें:*
-Google Maps पर खोजें: *JRD Public School Marui Varanasi*`);
+            await sendReply(jid, `📍 *विद्यालय लोकेशन:*\nJRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)\n\n🗺 *गूगल मैप्स पर ढूँढें:*\nGoogle Maps पर खोजें: *JRD Public School Marui Varanasi*`);
             return;
         }
 
-        // 💬 2. आम बातचीत (Casual Talk)
         const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
         if (casualWords.some(word => lowerText.includes(word))) {
             await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए सीधे उसका **नाम** लिखकर भेजें। मुख्य मेन्यू के लिए **Menu** लिखें।`);
             return;
         }
 
-        // 🔍 3. DOUBLE FILTER SEARCH ENGINE
         if (text.length >= 2) {
             try {
                 const cleanQuery = text.replace(/^#/, '').trim();
@@ -164,19 +162,10 @@ Google Maps पर खोजें: *JRD Public School Marui Varanasi*`);
                     await sendStudentProfileCard(jid, response.data.data);
                 }
                 else if (response.data && response.data.status === 'unregistered_number') {
-                    await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*
-
-आपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।
-
-सुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।
-_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
+                    await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।\n_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
                 }
                 else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
-                    await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*
-
-छात्र का नाम *"${cleanQuery}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।
-
-कृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
+                    await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम *"${cleanQuery}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।\n\nकृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
                 }
             } catch (error) {
                 console.error('Database Search Error:', error.message);
@@ -185,7 +174,6 @@ _यदि आपने नया नंबर लिया है, तो क�
     });
 }
 
-// ✉️ सामान्य रिप्लाई भेजने का हेल्पर
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
@@ -196,64 +184,19 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 सुरक्षित टेक्स्ट-बेस्ड फीस रसीद (एन्क्रिप्शन एरर मुक्त)
 async function sendFeeTextReceipt(jid, data) {
     const cleanDet = (data.details || '').replace(/<br>/g, "\n");
-    const receiptText = `🏫 *J.R.D. PUBLIC SCHOOL*
-📍 *मरुई, वाराणसी (उ.प्र.)*
-🧾 *आधिकारिक फ़ीस जमा रसीद*
-━━━━━━━━━━━━━━━━━━━━━━━
-🆔 *रसीद सं (Receipt No):* ${data.rid || 'N/A'}
-👤 *छात्र का नाम:* *${data.name || 'N/A'}*
-🏫 *कक्षा:* ${data.className || 'N/A'}
-📅 *सत्र:* ${data.session || '2026-27'}
-
-💰 *जमा राशि (Paid Amount): ₹${data.paid || 0}/-*
-━━━━━━━━━━━━━━━━━━━━━━━
-📊 *फ़ीस विवरण Breakdown:*
-${cleanDet || 'शुल्क जमा'}
-
-━━━━━━━━━━━━━━━━━━━━━━━
-✨ *धन्यवाद!* - JRD Public School Management`;
+    const receiptText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *रसीद सं (Receipt No):* ${data.rid || 'N/A'}\n👤 *छात्र का नाम:* *${data.name || 'N/A'}*\n🏫 *कक्षा:* ${data.className || 'N/A'}\n📅 *सत्र:* ${data.session || '2026-27'}\n\n💰 *जमा राशि (Paid Amount): ₹${data.paid || 0}/-*\n━━━━━━━━━━━━━━━━━━━━━━━\n📊 *फ़ीस विवरण Breakdown:*\n${cleanDet || 'शुल्क जमा'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n✨ *धन्यवाद!* - JRD Public School Management`;
 
     await sendReply(jid, receiptText);
 }
 
 async function sendStudentProfileCard(jid, s) {
-    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*
-🏫 *JRD Public School, Marui*
-📅 *सत्र (Session):* ${s.session || '2026-27'}
-━━━━━━━━━━━━━━━━━━━━━━━
-🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\`
-📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}
-🔢 *Roll No:* ${s.roll_no || 'N/A'}
-
-👤 *छात्र का नाम:* *${s.name}*
-👨‍👦 *पिता का नाम:* ${s.father}
-👩‍👦 *माता का नाम:* ${s.mother}
-🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})
-
-💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}
-
-📊 *भुगतान/जमा विवरण:*
-${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}
-
-⚠️ *बकाया शुल्क विवरण:*
-${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}
-
-━━━━━━━━━━━━━━━━━━━━━━━
-🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*
-• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}
-• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}
----------------------------------------
-🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*
-━━━━━━━━━━━━━━━━━━━━━━━
-_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
+    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\`\n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}\n• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -276,15 +219,12 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
 async function processQueue() {
     if (isProcessingQueue || messageQueue.length === 0) return;
     isProcessingQueue = true;
-
-    let processedCount = 0;
 
     while (messageQueue.length > 0) {
         const item = messageQueue.shift();
@@ -314,15 +254,8 @@ async function processQueue() {
                 console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
             }
 
-            processedCount++;
-
-            const randomDelay = Math.floor(Math.random() * 2000) + 2000;
-            await new Promise(res => setTimeout(res, randomDelay));
-
-            if (processedCount % 20 === 0) {
-                console.log('⏸️ व्हाट्सएप सुरक्षा: 10 सेकंड का ब्रेक लिया जा रहा है...');
-                await new Promise(res => setTimeout(res, 10000));
-            }
+            // मैसेज भेजने के बीच सुरक्षित 2.5 सेकंड का गैप
+            await new Promise(res => setTimeout(res, 2500));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
@@ -332,18 +265,26 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 🎯 FLEXIBLE RECEIVER ENDPOINT
+// 🎯 MAIN ENQUEUE ENDPOINT (With Anti-Duplicate Protection)
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
 
     if (!targetPhone) {
-        console.error("❌ Invalid Enqueue Payload: Phone number missing!", body);
         return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
     }
 
+    const cleanPhone = targetPhone.toString().replace(/[^0-9]/g, '').slice(-10);
+    const keyContent = body.rid || body.receipt_no || body.message || body.amount || 'general';
+
+    // 🛡️ चेक करें कि क्या यह डुप्लिकेट मैसेज तो नहीं है
+    if (isDuplicateMessage(cleanPhone, keyContent)) {
+        console.log(`⚠️ [DUPLICATE BLOCKED] यह मैसेज हाल ही में भेजा जा चुका है -> ${cleanPhone}`);
+        return res.status(200).json({ status: 'ignored_duplicate', message: 'Message already queued recently' });
+    }
+
     messageQueue.push({
-        number: targetPhone.toString(),
+        number: cleanPhone,
         message: body.message || "",
         type: body.type || 'GENERAL',
         name: body.name || body.student_name || '',
@@ -354,13 +295,14 @@ app.post('/enqueue-message', (req, res) => {
         details: body.details || ''
     });
 
-    console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${targetPhone} (कुल क्यू: ${messageQueue.length})`);
+    console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${cleanPhone} (कुल क्यू: ${messageQueue.length})`);
 
     processQueue();
 
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
 });
 
+// 🛑 पुराना डायरेक्ट सेंड पॉइंट (इसे भी डुप्लिकेट से सुरक्षित किया गया है)
 app.post('/send-whatsapp', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
@@ -368,11 +310,17 @@ app.post('/send-whatsapp', async (req, res) => {
 
     if (!targetPhone || !message) return res.status(400).json({ status: 'error', message: 'Missing params' });
 
+    const cleanPhone = targetPhone.toString().replace(/[^0-9]/g, '').slice(-10);
+
+    if (isDuplicateMessage(cleanPhone, message)) {
+        console.log(`⚠️ [DUPLICATE BLOCKED] /send-whatsapp पर इग्नोर किया गया -> ${cleanPhone}`);
+        return res.status(200).json({ status: 'ignored_duplicate' });
+    }
+
     try {
         if (!sock || !isBotReady) return res.status(503).json({ status: 'error', message: 'Bot not ready' });
 
-        let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
-        if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
+        let formattedNumber = cleanPhone.length === 10 ? '91' + cleanPhone : cleanPhone;
         await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
         return res.status(200).json({ status: 'success' });
     } catch (error) {
@@ -380,12 +328,10 @@ app.post('/send-whatsapp', async (req, res) => {
     }
 });
 
-// 🛠️ PORT DYNAMIC FIX
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
-// 🔄 Keep-Alive Self Ping
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
