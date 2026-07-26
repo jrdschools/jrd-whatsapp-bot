@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -31,7 +31,7 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🎯 WhatsApp LID / कचरा इंटरनल नंबर हटाकर असली 10-अंकों का गार्जियन मोबाइल नंबर निकालने का सटीक लॉजिक
+// 🎯 WhatsApp LID / कचरा इंटरनल नंबर हटाकर केवल असली 10-अंकों का गार्जियन मोबाइल नंबर निकालने का बुलेटप्रूफ लॉजिक
 function extractClean10DigitPhone(jid, msg) {
     try {
         let candidates = [];
@@ -43,15 +43,18 @@ function extractClean10DigitPhone(jid, msg) {
         for (let str of candidates) {
             let digits = str.replace(/[^0-9]/g, '');
             
+            // अगर 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
             if (digits.length === 12 && digits.startsWith('91')) {
                 let p = digits.substring(2);
                 if (/^[6-9]\d{9}$/.test(p)) return p;
             }
             
+            // अगर शुद्ध 10-अंकों का भारतीय नंबर है
             if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
                 return digits;
             }
 
+            // अगर स्ट्रिंग में 10 अंकों का गार्जियन नंबर छिपा हो
             let match = digits.match(/[6-9]\d{9}/);
             if (match && match[0]) {
                 return match[0];
@@ -65,7 +68,7 @@ function extractClean10DigitPhone(jid, msg) {
     }
 }
 
-// 🧹 पुराना खराब सेशन पूरी तरह डिलीट करने का फ़ंक्शन
+// 🧹 पुराना खराब सेशन पूरी तरह साफ़ करने का फ़ंक्शन
 function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
@@ -89,10 +92,17 @@ async function startBot() {
 
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+        
+        // WhatsApp Web का लेटेस्ट वर्ज़न फेच करना ताकि QR ऑटो-लोड हो
+        let version = [2, 3000, 1017531287];
+        try {
+            const fetched = await fetchLatestBaileysVersion();
+            if (fetched && fetched.version) version = fetched.version;
+        } catch (e) {}
 
         sock = makeWASocket({
             auth: state,
-            version: [2, 3000, 1017531287],
+            version,
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
@@ -116,14 +126,14 @@ async function startBot() {
 
             if (qr) {
                 currentQrCode = qr;
-                isConnecting = false;
-                console.log('✅ 🔥 नया QR Code तैयार है! /qr पर जाएँ।');
+                isConnecting = false; // 🔓 QR आते ही कनेक्शन लॉक खोलें
+                console.log('✅ 🔥 नया QR Code तैयार है! /qr पेज पर जाएँ।');
                 qrcodeTerminal.generate(qr, { small: true });
             }
 
             if (connection === 'close') {
                 isBotReady = false;
-                isConnecting = false;
+                isConnecting = false; // 🔓 डिस्कनेक्ट होने पर पुनः अटेम्प्ट की अनुमति दें
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
 
                 console.log('⚠️ कनेक्शन बंद हुआ | StatusCode:', statusCode);
@@ -142,7 +152,7 @@ async function startBot() {
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Active & Connected! ');
+                    console.log(' 🎉 JRD VIP Bot Active & Cleanly Connected! ');
                     console.log('=============================================\n');
                 }, 3000);
             }
@@ -158,11 +168,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
+            // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
             const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | असली मोबाइल नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+            console.log(`📱 मैसेज आया | गार्जियन असली नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
@@ -228,7 +239,7 @@ async function startBot() {
         });
 
     } catch (err) {
-        isConnecting = false;
+        isConnecting = false; // 🔓 एरर आने पर रि-ट्राय लॉक खोलें
         console.error('❌ startBot error:', err.message);
     }
 }
@@ -347,10 +358,10 @@ async function sendStudentProfileCard(jid, s) {
 // 🌐 QR कोड पेज
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; color:green; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है!</h2>');
     }
     if (!currentQrCode) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh (F5) करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
     }
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQrCode)}`;
     res.send(`
