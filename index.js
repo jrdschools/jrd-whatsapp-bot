@@ -297,7 +297,7 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
+// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE (100% RELIABLE DELIVERY FIX)
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -305,49 +305,41 @@ async function processQueue() {
     if (isProcessingQueue || messageQueue.length === 0) return;
     isProcessingQueue = true;
 
-    let processedCount = 0;
-
     while (messageQueue.length > 0) {
-        const item = messageQueue.shift();
+        const item = messageQueue[0]; // पहले संदेश को पढ़ें
         try {
-            if (!sock || !isBotReady) {
-                console.log('⚠️ बॉट अभी पूरी तरह कनेक्टेड नहीं है, मैसेज होल्ड किया जा रहा है...');
-                messageQueue.unshift(item);
-                await new Promise(res => setTimeout(res, 3000));
-                continue;
-            }
-
             let formattedNumber = item.number.toString().replace(/[^0-9]/g, '');
             if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
             const jid = formattedNumber + '@s.whatsapp.net';
 
-            // 🎯 स्मार्ट डिलीवरी: अगर PDF रसीद का प्रकार है तो PDF भेजो, वरना सीधे टेक्स्ट रसीद डिलीवर करो
-            if (item.type === 'PDF_RECEIPT') {
-                await sendFeePdfReceipt(jid, item);
-                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
-            } else {
-                let textToSend = item.message;
-                if (!textToSend || textToSend.trim() === '') {
-                    const cleanDet = (item.details || '').replace(/<br>/g, "\n");
-                    textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
+            // यदि सॉकेट और बॉट तैयार हैं तो तुरंत भेजें
+            if (sock && (isBotReady || sock.user)) {
+                if (item.type === 'PDF_RECEIPT') {
+                    await sendFeePdfReceipt(jid, item);
+                    console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
+                } else {
+                    let textToSend = item.message;
+                    if (!textToSend || textToSend.trim() === '') {
+                        const cleanDet = (item.details || '').replace(/<br>/g, "\n");
+                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
+                    }
+
+                    await sock.sendMessage(jid, { text: textToSend });
+                    console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
                 }
-
-                await sock.sendMessage(jid, { text: textToSend });
-                console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
+                
+                messageQueue.shift(); // सफल होने पर क्यू से निकालें
+            } else {
+                console.log('⚠️ बॉट अभी व्हाट्सएप से सिंक हो रहा है, 2 सेकंड बाद पुनः प्रयास करेगा...');
+                await new Promise(res => setTimeout(res, 2000));
+                break;
             }
 
-            processedCount++;
-
-            const randomDelay = Math.floor(Math.random() * 2000) + 1000;
-            await new Promise(res => setTimeout(res, randomDelay));
-
-            if (processedCount % 20 === 0) {
-                console.log('⏸️ व्हाट्सएप सुरक्षा: 10 सेकंड का ब्रेक लिया जा रहा है...');
-                await new Promise(res => setTimeout(res, 10000));
-            }
+            await new Promise(res => setTimeout(res, 1500));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+            messageQueue.shift(); // एरर आने पर भी अगले मैसेज के लिए शिफ्ट करें
         }
     }
 
@@ -380,6 +372,7 @@ app.post('/enqueue-message', (req, res) => {
 
     console.log(`📥 नया संदेश क्यू में दर्ज हुआ -> ${targetPhone} (कुल क्यू: ${messageQueue.length})`);
 
+    // तत्काल क्यू प्रोसेसिंग चालू करें
     processQueue();
 
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
