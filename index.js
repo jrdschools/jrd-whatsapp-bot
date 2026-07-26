@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -9,11 +9,11 @@ const https = require('https');
 
 const app = express();
 
-// 🚀 Rate Limiting और Payload Lock हटाने के लिए बॉडी पार्सर बढ़ा दिया गया है
+// 🚀 Rate Limiting और Payload Lock हटाने के लिए बॉडी पार्सर
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// CORS और हेडर अलाउ करने के लिए (गूगल ऐप्स स्क्रिप्ट सिंक फ़िक्स)
+// CORS और हेडर अलाउ करने के लिए
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -22,88 +22,106 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-// 🔑 "Waiting for this message" को जड़ से खत्म करने के लिए मैसेज कैश स्टोरेज
+// 🔑 1. "Waiting for this message" को रोकने के लिए मैपिंग और री-ट्राई कैश
 const messageCache = new Map();
+const msgRetryCounterCache = new Map();
 
-let sock;
+let sock = null;
 let currentQrCode = '';
 let isBotReady = false;
+let isConnecting = false;
 
 // 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const { version } = await fetchLatestBaileysVersion();
-    console.log('ℹ️ WhatsApp Web version इस्तेमाल हो रहा है:', version.join('.'));
+    if (isConnecting) return;
+    isConnecting = true;
 
-    sock = makeWASocket({
-        auth: state,
-        version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
-        syncFullHistory: false,
-        markOnlineOnConnect: true,
-        browser: ['JRD School Bot', 'Chrome', '1.0.0'],
-        // 🔑 असली मैसेज री-ट्राई हेंडलर (Waiting Error Fix)
-        getMessage: async (key) => {
-            if (messageCache.has(key.id)) {
-                return messageCache.get(key.id);
+    try {
+        if (sock) {
+            try { sock.ev.removeAllListeners(); } catch (e) {}
+            sock = null;
+        }
+
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+        const { version } = await fetchLatestBaileysVersion();
+        console.log('ℹ️ WhatsApp Web version इस्तेमाल हो रहा है:', version.join('.'));
+
+        sock = makeWASocket({
+            auth: state,
+            version,
+            logger: pino({ level: 'silent' }),
+            printQRInTerminal: false,
+            syncFullHistory: false,
+            markOnlineOnConnect: true,
+            browser: Browsers.ubuntu('Chrome'),
+            
+            // 🛡️ WAITING ERROR FIX: री-ट्राई काउंटर और मैसेज डिक्रिप्शन कैश
+            msgRetryCounterCache,
+            retryRequestDelayMs: 250,
+            maxMsgRetryCount: 5,
+            
+            getMessage: async (key) => {
+                if (messageCache.has(key.id)) {
+                    return messageCache.get(key.id);
+                }
+                return { conversation: 'JRD Public School' };
             }
-            return { conversation: 'JRD Public School Notification' };
-        }
-    });
+        });
 
-    sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        sock.ev.on('connection.update', (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
-            currentQrCode = qr;
-            console.log('👉 QR Code जनरेट हो गया है! /qr लिंक पर जाकर स्कैन करें।');
-            qrcodeTerminal.generate(qr, { small: true });
-        }
-
-        if (connection === 'close') {
-            isBotReady = false;
-            const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
-            if (shouldReconnect) {
-                setTimeout(() => startBot(), 5000);
-            } else {
-                console.log('❌ Logged out. auth_info_baileys फ़ोल्डर हटाकर दोबारा QR स्कैन करना होगा।');
+            if (qr) {
+                currentQrCode = qr;
+                console.log('👉 QR Code जनरेट हो गया है! /qr लिंक पर जाकर स्कैन करें।');
+                qrcodeTerminal.generate(qr, { small: true });
             }
-        } else if (connection === 'open') {
-            isBotReady = true;
-            currentQrCode = '';
-            console.log('\n=============================================');
-            console.log(' JRD Enterprise VIP Bot Active & Secured! ');
-            console.log('=============================================\n');
-        }
-    });
 
-    // 📩 आने वाले मैसेज हैंडल करना
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
-        const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+            if (connection === 'close') {
+                isBotReady = false;
+                isConnecting = false;
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
+                if (shouldReconnect) {
+                    setTimeout(() => startBot(), 5000);
+                } else {
+                    console.log('❌ Logged out. auth_info_baileys फ़ोल्डर हटाकर दोबारा QR स्कैन करना होगा।');
+                }
+            } else if (connection === 'open') {
+                isBotReady = true;
+                isConnecting = false;
+                currentQrCode = '';
+                console.log('\n=============================================');
+                console.log(' JRD Enterprise VIP Bot Active & Secured! ');
+                console.log('=============================================\n');
+            }
+        });
 
-        const jid = msg.key.remoteJid;
-        if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
+        // 📩 आने वाले मैसेज हैंडल करना
+        sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            if (type !== 'notify') return;
+            const msg = messages[0];
+            if (!msg.message || msg.key.fromMe) return;
 
-        try {
-            await sock.readMessages([msg.key]);
-        } catch (e) {}
+            const jid = msg.key.remoteJid;
+            if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
 
-        const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
-        const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
-        const lowerText = text.toLowerCase();
+            try {
+                await sock.readMessages([msg.key]);
+            } catch (e) {}
 
-        console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
+            const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+            const lowerText = text.toLowerCase();
 
-        // 🎯 1. हेल्प एवं वेलकम मेन्यू
-        if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
-            const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*
+            console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
+
+            // 🎯 1. हेल्प एवं वेलकम मेन्यू
+            if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
+                const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*
 📍 *मरुई, वाराणसी (उ.प्र.)*
 ━━━━━━━━━━━━━━━━━━━━━━━
 🙏 *अभिभावक डिजिटल सेवा केंद्र*
@@ -120,67 +138,72 @@ async function startBot() {
 
 _नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_
 ━━━━━━━━━━━━━━━━━━━━━━━`;
-            await sendReply(jid, menuText);
-            return;
-        }
+                await sendReply(jid, menuText);
+                return;
+            }
 
-        if (lowerText === '1') {
-            await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें। *`);
-            return;
-        }
-        if (lowerText === '2') {
-            await sendReply(jid, `⏰ *स्कूल समय एवं नियम*\n🏫 *JRD Public School*\n━━━━━━━━━━━━━━━━━━━━━━━\n⏱ *समय:* सुबह 07:30 AM से दोपहर 01:30 PM तक\n📅 *दिन:* सोमवार से शनिवार\n\n_नोट: कृपया बच्चों को पूर्ण गणवेश (Uniform) में समय से भेजें।_`);
-            return;
-        }
-        if (lowerText === '3') {
-            await sendReply(jid, `👑 *प्रबंधकीय संदेश*\n🏫 *JRD Public School Management*\n━━━━━━━━━━━━━━━━━━━━━━━\n✨ *संस्थापक:* श्री बंशगोपाल वर्मा जी\n✨ *प्रबंधक:* डॉ. बंशलाल जी\n\n> *"हम प्रत्येक बच्चे के सर्वांगीण विकास एवं उज्ज्वल भविष्य के लिए पूर्णतः समर्पित हैं।"*`);
-            return;
-        }
-        if (lowerText === '4') {
-            await sendReply(jid, `📍 *विद्यालय लोकेशन:*
+            if (lowerText === '1') {
+                await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें। *`);
+                return;
+            }
+            if (lowerText === '2') {
+                await sendReply(jid, `⏰ *स्कूल समय एवं नियम*\n🏫 *JRD Public School*\n━━━━━━━━━━━━━━━━━━━━━━━\n⏱ *समय:* सुबह 07:30 AM से दोपहर 01:30 PM तक\n📅 *दिन:* सोमवार से शनिवार\n\n_नोट: कृपया बच्चों को पूर्ण गणवेश (Uniform) में समय से भेजें।_`);
+                return;
+            }
+            if (lowerText === '3') {
+                await sendReply(jid, `👑 *प्रबंधकीय संदेश*\n🏫 *JRD Public School Management*\n━━━━━━━━━━━━━━━━━━━━━━━\n✨ *संस्थापक:* श्री बंशगोपाल वर्मा जी\n✨ *प्रबंधक:* डॉ. बंशलाल जी\n\n> *"हम प्रत्येक बच्चे के सर्वांगीण विकास एवं उज्ज्वल भविष्य के लिए पूर्णतः समर्पित हैं।"*`);
+                return;
+            }
+            if (lowerText === '4') {
+                await sendReply(jid, `📍 *विद्यालय लोकेशन:*
 JRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)
 
 🗺 *गूगल मैप्स पर ढूँढें:*
 Google Maps पर खोजें: *JRD Public School Marui Varanasi*`);
-            return;
-        }
+                return;
+            }
 
-        // 💬 2. आम बातचीत (Casual Talk)
-        const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
-        if (casualWords.some(word => lowerText.includes(word))) {
-            await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए सीधे उसका **नाम** लिखकर भेजें। मुख्य मेन्यू के लिए **Menu** लिखें।`);
-            return;
-        }
+            // 💬 2. आम बातचीत (Casual Talk)
+            const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
+            if (casualWords.some(word => lowerText.includes(word))) {
+                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए सीधे उसका **नाम** लिखकर भेजें। मुख्य मेन्यू के लिए **Menu** लिखें।`);
+                return;
+            }
 
-        // 🔍 3. DOUBLE FILTER SEARCH ENGINE
-        if (text.length >= 2) {
-            try {
-                const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(text)}`;
-                const response = await axios.get(apiUrl, { timeout: 15000 });
+            // 🔍 3. DOUBLE FILTER SEARCH ENGINE
+            if (text.length >= 2) {
+                try {
+                    const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(text)}`;
+                    const response = await axios.get(apiUrl, { timeout: 15000 });
 
-                if (response.data && response.data.status === 'success') {
-                    await sendStudentProfileCard(jid, response.data.data);
-                }
-                else if (response.data && response.data.status === 'unregistered_number') {
-                    await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*
+                    if (response.data && response.data.status === 'success') {
+                        await sendStudentProfileCard(jid, response.data.data);
+                    }
+                    else if (response.data && response.data.status === 'unregistered_number') {
+                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*
 
 आपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।
 
 सुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।
 _यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
-                }
-                else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
-                    await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*
+                    }
+                    else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
+                        await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*
 
 छात्र का नाम *"${text}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।
 
 कृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
+                    }
+                } catch (error) {
+                    console.error('Database Search Error:', error.message);
                 }
-            } catch (error) {
-                console.error('Database Search Error:', error.message);
             }
-        }
-    });
+        });
+
+    } catch (err) {
+        isConnecting = false;
+        console.error('❌ startBot error:', err.message);
+    }
 }
 
 // ✉️ सामान्य रिप्लाई भेजने का हेल्पर (कैश के साथ)
