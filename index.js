@@ -1,5 +1,10 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    fetchLatestBaileysVersion,
+    makeInMemoryStore // 👈 फिक्स १: इन-मेमोरी स्टोर इम्पोर्ट किया
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -22,6 +27,9 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
+// 🔑 फिक्स २: व्हाट्सएप मैसेज चाबियाँ याद रखने के लिए मेमोरी स्टोर बनाया
+const store = makeInMemoryStore({ logger: pino({ level: 'silent' }).child({ level: 'silent' }) });
+
 let sock;
 let currentQrCode = '';
 let isBotReady = false;
@@ -38,8 +46,19 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         syncFullHistory: false,
-        browser: ['JRD School Bot', 'Chrome', '1.0.0']
+        browser: ['JRD School Bot', 'Chrome', '1.0.0'],
+        // 🔑 फिक्स ३: "Waiting for this message" की समस्या खत्म करने वाला डिक्रिप्शन हैंडलर
+        getMessage: async (key) => {
+            if (store) {
+                const msg = await store.loadMessage(key.remoteJid, key.id);
+                return msg?.message || undefined;
+            }
+            return { conversation: 'Hello' };
+        }
     });
+
+    // 🔑 फिक्स ४: स्टोर को सॉकेट से लिंक किया
+    store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
