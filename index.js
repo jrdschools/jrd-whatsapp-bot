@@ -23,7 +23,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// 🔑 "Waiting for this message" को रोकने के लिए एडवांस डिक्रिप्शन और प्री-की कैश
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
@@ -36,10 +35,10 @@ function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
         }
     } catch (e) {
-        console.error('❌ Auth Folder साफ़ करने में त्रुटि:', e.message);
+        console.error('❌ Error clearing Auth Folder:', e.message);
     }
 }
 
@@ -60,9 +59,7 @@ async function startBot() {
         try {
             const fetched = await fetchLatestBaileysVersion();
             if (fetched && fetched.version) latestVersion = fetched.version;
-        } catch (e) {
-            console.log('ℹ️ डिफ़ॉल्ट लेटेस्ट व्हाट्सएप वर्ज़न यूज़ हो रहा है');
-        }
+        } catch (e) {}
 
         sock = makeWASocket({
             auth: state,
@@ -73,18 +70,14 @@ async function startBot() {
             markOnlineOnConnect: true,
             browser: Browsers.macOS('Desktop'),
             
-            // 🛡️ WAITING ERROR PERMANENT FIX
+            // 🛡️ WAITING ERROR FIX (Signal Sync Settings)
             msgRetryCounterCache,
-            retryRequestDelayMs: 1000,
+            retryRequestDelayMs: 1500,
             maxMsgRetryCount: 5,
-            emitOwnEvents: true,
 
-            // डिक्रिप्शन के लिए पुराने मैसेज और कीज़ का रिस्पॉन्स
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) {
-                    return messageCache.get(key.id);
-                }
-                return { conversation: 'JRD Public School Notification' };
+                if (messageCache.has(key.id)) return messageCache.get(key.id);
+                return { conversation: 'JRD Public School' };
             }
         });
 
@@ -116,17 +109,16 @@ async function startBot() {
                 isConnecting = false;
                 currentQrCode = '';
                 
-                // Signal E2EE Key Sync के लिए 3 सेकंड का वार्म-अप
+                // 🔑 Keys को पूरी तरह सिंक होने के लिए 5 सेकंड का वार्म-अप
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Active & E2EE Keys Synced! ');
+                    console.log(' 🎉 JRD VIP Bot Connected & E2EE Synced! ');
                     console.log('=============================================\n');
-                }, 3000);
+                }, 5000);
             }
         });
 
-        // 📩 मैसेज रिसिविंग लॉजिक
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             const msg = messages[0];
@@ -223,7 +215,6 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 OFFICIAL BRANDED SCHOOL PDF RECEIPT
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -248,21 +239,17 @@ async function sendFeePdfReceipt(jid, data) {
                 resolve();
             });
 
-            // 1. Double Outer Border
             doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
             doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
 
-            // 2. Header Box Banner
             doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
             doc.fillColor('#FFFFFF').fontSize(16).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
             doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) | Contact: Office Administration', 20, 48, { align: 'center' });
 
-            // 3. Receipt Sub-Title Ribbon
             doc.fillColor('#000000');
             doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
             doc.fillColor('#1A365D').fontSize(10).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
 
-            // 4. Student & Receipt Meta Grid
             const metaTop = 110;
             doc.rect(20, metaTop, doc.page.width - 40, 75).lineWidth(0.5).stroke('#CBD5E1');
 
@@ -287,7 +274,6 @@ async function sendFeePdfReceipt(jid, data) {
             const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
             doc.font('Helvetica').text(`${todayDate}`, rightX + 50, metaTop + 46);
 
-            // 5. Breakdown Table
             const tableTop = 195;
             doc.rect(20, tableTop, doc.page.width - 40, 20).fill('#F1F5F9');
             doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
@@ -307,7 +293,6 @@ async function sendFeePdfReceipt(jid, data) {
             doc.text('TOTAL AMOUNT PAID:', 30, totalBoxY + 9);
             doc.text(`Rs. ${data.paid || 0}/-`, doc.page.width - 130, totalBoxY + 9, { align: 'right' });
 
-            // 6. Footer & Digital Stamp Area
             const footerY = doc.page.height - 75;
             doc.fillColor('#64748B').fontSize(7.5).font('Helvetica-Oblique');
             doc.text('This is an officially generated digital fee receipt from JRD Public School Management.', 20, footerY, { align: 'center' });
@@ -365,7 +350,6 @@ app.get('/', (req, res) => {
 let messageQueue = [];
 let isProcessingQueue = false;
 
-// 🛡️ DUAL-DELIVERY MESSAGE QUEUE ENGINE
 async function processQueue() {
     if (isProcessingQueue || messageQueue.length === 0) return;
     isProcessingQueue = true;
@@ -385,14 +369,13 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. पूरा टेक्स्ट विवरण भेजना
+                // 1. टेक्स्ट मैसेज
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
-                console.log(`✅ [TEXT MSG] भेजा गया -> ${formattedNumber}`);
 
-                // 2. साथ ही सुंदर ब्रांडेड PDF रसीद भी भेजना
+                // 2. 1 सेकंड रुक कर PDF
+                await new Promise(res => setTimeout(res, 1000));
                 await sendFeePdfReceipt(jid, item);
-                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
 
                 messageQueue.shift();
             } else {
@@ -400,7 +383,7 @@ async function processQueue() {
                 break;
             }
 
-            await new Promise(res => setTimeout(res, 2000));
+            await new Promise(res => setTimeout(res, 2500));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
