@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const express = require('express');
 const axios = require('axios');
@@ -26,6 +26,7 @@ const messageCache = new Map();
 let sock = null;
 let currentQrCode = '';
 let isBotReady = false;
+let isConnecting = false;
 
 // 🎯 WhatsApp LID या कचरा नंबर हटाकर असली 10-अंकों का मोबाइल नंबर निकालने का सटीक फ़ंक्शन
 function extractClean10DigitPhone(jid, msg) {
@@ -70,6 +71,9 @@ function clearAuthFolder() {
 }
 
 async function startBot() {
+    if (isConnecting) return;
+    isConnecting = true;
+
     try {
         if (sock) {
             try { 
@@ -79,19 +83,28 @@ async function startBot() {
             sock = null;
         }
 
-        currentQrCode = '';
-        isBotReady = false;
-        console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
-        
+        console.log('⚡ Railway परिवेश में WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
+        // 🔑 WhatsApp Web का ताज़ा वर्ज़न हासिल करना ताकि कनेक्शन ब्लॉक न हो
+        let version = [2, 3000, 1017531287];
+        try {
+            const fetched = await fetchLatestBaileysVersion();
+            if (fetched && fetched.version) version = fetched.version;
+        } catch (e) {}
+
         sock = makeWASocket({
+            version,
             auth: state,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: false,
+            printQRInTerminal: true,
             syncFullHistory: false,
             markOnlineOnConnect: false,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'), // Railway संगत ब्राउज़र फिंगरप्रिंट
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 0,
+            keepAliveIntervalMs: 10000,
+            generateHighQualityLinkPreview: false,
             getMessage: async (key) => {
                 if (messageCache.has(key.id)) return messageCache.get(key.id);
                 return { conversation: 'JRD Public School' };
@@ -105,27 +118,30 @@ async function startBot() {
 
             if (qr) {
                 currentQrCode = qr;
-                console.log('✅ 🔥 नया QR Code तुरंत जनरेट हो गया!');
+                isConnecting = false;
+                console.log('✅ 🔥 Railway पर नया QR Code सफलता से बन गया!');
             }
 
             if (connection === 'close') {
                 isBotReady = false;
+                isConnecting = false;
                 currentQrCode = '';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-                console.log('⚠️ कनेक्शन बंद हुआ | StatusCode:', statusCode);
+                console.log('⚠️ कनेक्शन क्लोज हुआ | StatusCode:', statusCode);
 
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-                    console.log('❌ सेशन लॉगआउट हुआ। फ्रेश QR बन रहा है...');
+                    console.log('❌ सेशन लॉगआउट हुआ। नया QR जनरेट हो रहा है...');
                     clearAuthFolder();
-                    setTimeout(() => startBot(), 1000);
+                    setTimeout(() => startBot(), 2000);
                 } else {
                     setTimeout(() => startBot(), 3000);
                 }
             } else if (connection === 'open') {
+                isConnecting = false;
                 currentQrCode = '';
                 isBotReady = true;
                 console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP Bot Successfully Connected! ');
+                console.log(' 🎉 JRD VIP Bot Successfully Connected on Railway! ');
                 console.log('=============================================\n');
             }
         });
@@ -210,8 +226,9 @@ async function startBot() {
         });
 
     } catch (err) {
+        isConnecting = false;
         console.error('❌ startBot error:', err.message);
-        setTimeout(() => startBot(), 2000);
+        setTimeout(() => startBot(), 3000);
     }
 }
 
@@ -326,7 +343,6 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड पेज (तत्काल जनरेशन)
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ बॉट कनेक्टेड है!</h2>');
@@ -350,8 +366,9 @@ app.get('/reset-qr', (req, res) => {
     clearAuthFolder();
     currentQrCode = '';
     isBotReady = false;
+    isConnecting = false;
     setTimeout(() => startBot(), 1000);
-    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:blue;">🧹 सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr खोलें</a>।</h2>');
+    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:blue;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr खोलें</a>।</h2>');
 });
 
 app.get('/', (req, res) => {
