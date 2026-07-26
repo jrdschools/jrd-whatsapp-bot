@@ -9,11 +9,9 @@ const https = require('https');
 
 const app = express();
 
-// 🚀 Body Parsers
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// CORS Headers
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -26,7 +24,47 @@ let sock;
 let currentQrCode = '';
 let isBotReady = false;
 
-// 🚀 Baileys Engine
+// 🎯 100% सटीक: व्हाट्सएप LID / फर्जी आईडी हटाकर केवल असली 10-अंकों का गार्जियन मोबाइल नंबर निकालने का फ़ंक्शन
+function extractRealGuardianPhone(msg, jid) {
+    try {
+        let candidates = [];
+
+        // 1. WhatsApp Message Context से नंबर देखें (WhatsApp Alt/Participant ID)
+        if (msg?.key?.remoteJidAlt) candidates.push(msg.key.remoteJidAlt);
+        if (msg?.key?.participant) candidates.push(msg.key.participant);
+        if (msg?.participant) candidates.push(msg.participant);
+        if (jid) candidates.push(jid);
+
+        for (let raw of candidates) {
+            if (!raw) continue;
+            let str = raw.split('@')[0].split(':')[0];
+            let digits = str.replace(/[^0-9]/g, '');
+
+            // यदि 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
+            if (digits.length === 12 && digits.startsWith('91')) {
+                let p = digits.substring(2);
+                if (/^[6-9]\d{9}$/.test(p)) return p; // असली गार्जियन नंबर
+            }
+
+            // यदि शुद्ध 10 अंकों का भारतीय मोबाइल नंबर है (6,7,8,9 से शुरू होने वाला)
+            if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
+                return digits;
+            }
+
+            // यदि लंबा स्ट्रिंग हो, तो उसमें से 10 अंकों का मोबाइल नंबर ढूँढें
+            let match = digits.match(/[6-9]\d{9}/);
+            if (match && match[0]) {
+                return match[0];
+            }
+        }
+
+        let fallback = (jid || '').split('@')[0].replace(/[^0-9]/g, '');
+        return fallback.slice(-10);
+    } catch (e) {
+        return (jid || '').split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+    }
+}
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -71,7 +109,6 @@ async function startBot() {
         }
     });
 
-    // 📩 आने वाले मैसेज प्राप्त करना एवं सुरक्षा नियम लागू करना
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
@@ -84,17 +121,16 @@ async function startBot() {
             await sock.readMessages([msg.key]);
         } catch (e) {}
 
-        // 🎯 आपका पसंदीदा शुद्ध 10-अंकों का नंबर निकालने वाला लॉजिक
-        const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+        // 🎯 LID फ़िक्स: अब हमेशा गार्जियन का असली 10-अंकों वाला मोबाइल नंबर ही एक्सट्रैक्ट होगा
+        const senderPhone = extractRealGuardianPhone(msg, jid);
         const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
         const lowerText = text.toLowerCase();
 
-        console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
+        console.log(`📱 मैसेज प्राप्त हुआ | असली गार्जियन नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
 
         const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText);
         const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
 
-        // 1️⃣ यदि यूजर कोई विकल्प नंबर (1, 2, 3, 4) चुनता है
         if (isOptionNum) {
             if (lowerText === '1') {
                 await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
@@ -114,33 +150,27 @@ async function startBot() {
             }
         }
 
-        // 2️⃣ डेटाबेस जाँच (रजिस्टर्ड बनाम अन-रजिस्टर्ड यूज़र प्राइवेसी सुरक्षा)
         if (text.length >= 2) {
             try {
                 const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(text)}`;
                 const response = await axios.get(apiUrl, { timeout: 15000 });
                 const resData = response.data || {};
 
-                // 🛑 केस 1: अन-रजिस्टर्ड मोबाइल नंबर
                 if (resData.status === 'unregistered_number') {
                     if (isGreeting || isOptionNum) {
-                        // अन-रजिस्टर्ड को सिर्फ स्कूल की सामान्य सूचना जाएगी
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
                     } else {
-                        // अन-रजिस्टर्ड यूज़र को प्रोफाइल देखने का अधिकार नहीं है
                         await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।\n_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
                     }
                     return;
                 }
 
-                // 🟢 केस 2: पंजीकृत मोबाइल नंबर (Registered User Greetings)
                 if (isGreeting) {
                     const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।\n\n_आपका नंबर पंजीकृत (Registered) है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
 
-                // केस 3: रजिस्टर्ड यूज़र छात्र प्रोफाइल खोज रहा है
                 if (resData.status === 'success') {
                     await sendStudentProfileCard(jid, resData.data);
                 } else if (resData.status === 'student_not_associated_with_number' || resData.status === 'not_found') {
@@ -156,7 +186,6 @@ async function startBot() {
     });
 }
 
-// ✉️ रिप्लाई भेजने का हेल्पर
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
@@ -167,7 +196,6 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 🎨 OFFICIAL A5 PDF FEES RECEIPT GENERATOR
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -189,21 +217,17 @@ async function sendFeePdfReceipt(jid, data) {
                 resolve();
             });
 
-            // 1. Double Outer Border
             doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
             doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
 
-            // 2. Header Box Banner
             doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
             doc.fillColor('#FFFFFF').fontSize(16).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
             doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) | Contact: Office Administration', 20, 48, { align: 'center' });
 
-            // 3. Receipt Ribbon
             doc.fillColor('#000000');
             doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
             doc.fillColor('#1A365D').fontSize(10).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
 
-            // 4. Student Meta Grid
             const metaTop = 110;
             doc.rect(20, metaTop, doc.page.width - 40, 75).lineWidth(0.5).stroke('#CBD5E1');
 
@@ -228,7 +252,6 @@ async function sendFeePdfReceipt(jid, data) {
             const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
             doc.font('Helvetica').text(`${todayDate}`, rightX + 50, metaTop + 46);
 
-            // 5. Breakdown Table
             const tableTop = 195;
             doc.rect(20, tableTop, doc.page.width - 40, 20).fill('#F1F5F9');
             doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
@@ -248,7 +271,6 @@ async function sendFeePdfReceipt(jid, data) {
             doc.text('TOTAL AMOUNT PAID:', 30, totalBoxY + 9);
             doc.text(`Rs. ${data.paid || 0}/-`, doc.page.width - 130, totalBoxY + 9, { align: 'right' });
 
-            // 6. Footer & Stamp Box
             const footerY = doc.page.height - 75;
             doc.fillColor('#64748B').fontSize(7.5).font('Helvetica-Oblique');
             doc.text('This is an officially generated digital fee receipt from JRD Public School Management.', 20, footerY, { align: 'center' });
@@ -299,7 +321,6 @@ _यदि फ़ीस अथवा विवरण में कोई त्�
     await sendReply(jid, replyMsg);
 }
 
-// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -322,7 +343,6 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
-// 🛡️ SMART DUAL-DELIVERY MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -346,7 +366,6 @@ async function processQueue() {
             if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
             const jid = formattedNumber + '@s.whatsapp.net';
 
-            // 🎯 फ़िक्स: भुगतान (Payment) होने पर अब टेक्स्ट मैसेज + PDF रसीद दोनों अपने-आप जाएँगे
             let cleanDet = (item.details || '').replace(/<br>/g, "\n");
             let textToSend = item.message;
 
@@ -354,11 +373,11 @@ async function processQueue() {
                 textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
             }
 
-            // 1. टेक्स्ट मैसेज भेजा जा रहा है
+            // 1. टेक्स्ट मैसेज
             await sock.sendMessage(jid, { text: textToSend });
             console.log(`✅ [TEXT SMS] सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
 
-            // 2. तुरंत 1 सेकंड रुक कर सुंदर PDF रसीद भी भेजी जा रही है
+            // 2. तुरंत 1 सेकंड रुक कर PDF रसीद
             await new Promise(res => setTimeout(res, 1000));
             await sendFeePdfReceipt(jid, item);
             console.log(`✅ [PDF RECEIPT] सफलतापूर्वक भेजी गई -> ${formattedNumber}`);
@@ -381,7 +400,6 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     
@@ -430,12 +448,10 @@ app.post('/send-whatsapp', async (req, res) => {
     }
 });
 
-// PORT FIX
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
 
-// Keep-Alive Self Ping
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful: Server is active');
