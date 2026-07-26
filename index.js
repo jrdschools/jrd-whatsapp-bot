@@ -36,35 +36,28 @@ function extractClean10DigitPhone(jid, msg) {
     try {
         let candidates = [];
 
-        // 1. WhatsApp Remote JID से नंबर निकालें
         if (jid) candidates.push(jid.split('@')[0].split(':')[0]);
-        // 2. Participant से निकालें
         if (msg?.key?.participant) candidates.push(msg.key.participant.split('@')[0].split(':')[0]);
-        // 3. RemoteJID Alternate
         if (msg?.key?.remoteJid) candidates.push(msg.key.remoteJid.split('@')[0].split(':')[0]);
 
         for (let str of candidates) {
             let digits = str.replace(/[^0-9]/g, '');
             
-            // अगर 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
             if (digits.length === 12 && digits.startsWith('91')) {
                 let p = digits.substring(2);
-                if (/^[6-9]\d{9}$/.test(p)) return p; // शुद्ध 10 अंकों का गार्जियन नंबर
+                if (/^[6-9]\d{9}$/.test(p)) return p;
             }
             
-            // अगर शुद्ध 10 अंकों का नंबर है
             if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
                 return digits;
             }
 
-            // अगर स्ट्रिंग लंबी है, तो उसमें से 10 अंकों का मोबाइल नंबर ढूँढें
             let match = digits.match(/[6-9]\d{9}/);
             if (match && match[0]) {
                 return match[0];
             }
         }
 
-        // फॉलबैक
         let fallback = jid.split('@')[0].replace(/[^0-9]/g, '');
         return fallback.slice(-10);
     } catch (e) {
@@ -72,6 +65,7 @@ function extractClean10DigitPhone(jid, msg) {
     }
 }
 
+// 🧹 पुराना खराब सेशन पूरी तरह डिलीट करने का फ़ंक्शन
 function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
@@ -132,6 +126,8 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
 
+                console.log('⚠️ कनेक्शन बंद हुआ | StatusCode:', statusCode);
+
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log('❌ सेशन लॉगआउट हुआ। नया QR जनरेट हो रहा है...');
                     clearAuthFolder();
@@ -146,7 +142,7 @@ async function startBot() {
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Active & Real Guardian Phone Fixed! ');
+                    console.log(' 🎉 JRD VIP Bot Active & Connected! ');
                     console.log('=============================================\n');
                 }, 3000);
             }
@@ -162,7 +158,6 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
             const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
@@ -349,12 +344,13 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
+// 🌐 QR कोड पेज
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है!</h2>');
     }
     if (!currentQrCode) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh (F5) करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
     }
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(currentQrCode)}`;
     res.send(`
@@ -368,6 +364,7 @@ app.get('/qr', (req, res) => {
     `);
 });
 
+// 🔄 इमरजेंसी फ्रेश QR रीसेट राउट
 app.get('/reset-qr', (req, res) => {
     clearAuthFolder();
     isBotReady = false;
@@ -403,11 +400,9 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. टेक्स्ट मैसेज
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
-                // 2. PDF रसीद
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
