@@ -27,6 +27,7 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = AUTH_BACKUP_SCRIPT_URL;
 
+// 🔑 "Waiting for this message" को रोकने के लिए मैसेज कैश और री-ट्राई स्टोर
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
@@ -35,7 +36,7 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 📦 पूरे auth_info_baileys फ़ोल्डर (pre-keys + session + creds) का ZIP बनाकर Google Sheet में सेव करना
+// 📦 पूरे auth_info_baileys फ़ोल्डर (pre-keys + session + creds) का ZIP बनाकर Cloud में बैकअप लेना
 async function backupAuthFolderToCloud() {
     try {
         if (!fs.existsSync(AUTH_FOLDER) || fs.readdirSync(AUTH_FOLDER).length === 0) return;
@@ -61,15 +62,15 @@ async function backupAuthFolderToCloud() {
                 value: base64Zip
             }, { timeout: 30000 });
 
-            console.log('☁️ पूरा auth_info_baileys फ़ोल्डर (Pre-keys सहित ZIP) क्लाउड में बैकअप हो गया।');
-            fs.unlinkSync(zipPath); // टेम्परेरी ज़िप फ़ाइल डिलीट
+            console.log('☁️ पूरा auth_info_baileys फ़ोल्डर (ZIP) क्लाउड में सफलतापूर्वक बैकअप हो गया।');
+            try { fs.unlinkSync(zipPath); } catch (e) {}
         }
     } catch (err) {
         console.error('❌ Auth folder backup error:', err.message);
     }
 }
 
-// 📦 रिस्टार्ट होने पर क्लाउड से ज़िप डाउनलोड करके पूरे auth_info_baileys को एक्सट्रैक्ट करना
+// 📦 री-स्टार्ट होने पर क्लाउड से ज़िप डाउनलोड करके पूरे Session keys रिस्टोर करना
 async function restoreAuthFolderFromCloud() {
     try {
         if (fs.existsSync(AUTH_FOLDER) && fs.readdirSync(AUTH_FOLDER).length > 0) {
@@ -96,9 +97,8 @@ async function restoreAuthFolderFromCloud() {
                 .on('error', reject);
         });
 
-        if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-
-        console.log('✅ क्लाउड से पूरा auth_info_baileys फ़ोल्डर (Session & Pre-keys) री-स्टोर हो गया!');
+        try { fs.unlinkSync(zipPath); } catch (e) {}
+        console.log('✅ क्लाउड से पूरा auth_info_baileys फ़ोल्डर री-स्टोर हो गया — session keys सुरक्षित हैं!');
     } catch (err) {
         console.error('❌ Auth folder restore error:', err.message);
     }
@@ -110,6 +110,7 @@ function scheduleAuthBackup() {
     backupTimer = setInterval(backupAuthFolderToCloud, 60 * 1000);
 }
 
+// 🚀 WhatsApp Bot Engine
 async function startBot() {
     if (isConnecting) return;
     isConnecting = true;
@@ -165,7 +166,7 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
+                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '| Reconnect:', shouldReconnect);
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 5000);
                 } else {
@@ -176,12 +177,12 @@ async function startBot() {
                 currentQrCode = '';
                 scheduleAuthBackup();
                 backupAuthFolderToCloud();
-                
-                // 🛡️ WAITING FIX: कनेक्शन खुलते ही 5 सेकंड का वार्म-अप टाइमर
+
+                // 🛡️ WAITING FIX: सिग्नल कीज़ सिंक होने के लिए 5 सेकंड का वार्म-अप समय
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' JRD Enterprise VIP Bot Active & Cloud-Synced! ');
+                    console.log(' JRD Enterprise VIP Bot Active & Secured! ');
                     console.log('=============================================\n');
                 }, 5000);
             }
@@ -201,7 +202,7 @@ async function startBot() {
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज प्राप्त हुआ | [${senderPhone}] : "${rawText}"`);
+            console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${rawText}"`);
 
             if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
                 const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें।\nउदा: *#Aditya* या *#EN12345*\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
