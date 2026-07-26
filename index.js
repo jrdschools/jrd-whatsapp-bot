@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -35,7 +35,7 @@ function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
         }
     } catch (e) {
         console.error('❌ Error clearing Auth Folder:', e.message);
@@ -55,31 +55,22 @@ async function startBot() {
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
-        let latestVersion = [2, 3000, 1017531287];
-        try {
-            const fetched = await fetchLatestBaileysVersion();
-            if (fetched && fetched.version) latestVersion = fetched.version;
-        } catch (e) {}
-
         sock = makeWASocket({
             auth: state,
-            version: latestVersion,
+            version: [2, 3000, 1017531287], // WhatsApp Web Stable Protocol
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: false, // 🛡️ Waiting Error Fix: Don't force online on connect
+            markOnlineOnConnect: true,
             browser: Browsers.macOS('Desktop'),
             
-            // 🛡️ WAITING ERROR FIX (Retry & Handshake Fix)
             msgRetryCounterCache,
-            retryRequestDelayMs: 2000,
+            retryRequestDelayMs: 1000,
             maxMsgRetryCount: 5,
 
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) {
-                    return messageCache.get(key.id);
-                }
-                return { conversation: 'JRD Public School Notification' };
+                if (messageCache.has(key.id)) return messageCache.get(key.id);
+                return { conversation: 'JRD Public School' };
             }
         });
 
@@ -111,13 +102,12 @@ async function startBot() {
                 isConnecting = false;
                 currentQrCode = '';
                 
-                // 🔑 Keys सिंक होने के लिए 5 सेकंड का वार्म-अप
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Connected & E2EE Synced! ');
+                    console.log(' 🎉 JRD VIP Bot Active & Free Engine Ready! ');
                     console.log('=============================================\n');
-                }, 5000);
+                }, 3000);
             }
         });
 
@@ -170,13 +160,13 @@ async function startBot() {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
                     } else {
-                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।`);
+                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।`);
                     }
                     return;
                 }
 
                 if (isGreeting) {
-                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत (Registered) है ✅_`;
+                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
@@ -217,7 +207,6 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 OFFICIAL BRANDED SCHOOL PDF RECEIPT
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -372,7 +361,7 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. टेक्स्ट मैसेज
+                // 1. टेक्स्ट विवरण भेजना
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
@@ -386,7 +375,7 @@ async function processQueue() {
                 break;
             }
 
-            await new Promise(res => setTimeout(res, 2500));
+            await new Promise(res => setTimeout(res, 2000));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
