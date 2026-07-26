@@ -1,7 +1,6 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
 const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
 const axios = require('axios');
 const PDFDocument = require('pdfkit');
@@ -24,23 +23,14 @@ app.use((req, res, next) => {
 });
 
 const messageCache = new Map();
-const msgRetryCounterCache = new Map();
-
 let sock = null;
 let currentQrCode = '';
 let isBotReady = false;
-let isConnecting = false;
 
-// 🎯 WhatsApp LID या कचरा नंबर हटाकर असली 10-अंकों का मोबाइल नंबर निकालने का बुलेटप्रूफ फ़ंक्शन
+// 🎯 WhatsApp LID या कचरा नंबर हटाकर असली 10-अंकों का मोबाइल नंबर निकालने का सटीक फ़ंक्शन
 function extractClean10DigitPhone(jid, msg) {
     try {
-        let rawJid = '';
-        if (msg && msg.key && msg.key.participant) {
-            rawJid = msg.key.participant;
-        } else {
-            rawJid = jid || '';
-        }
-
+        let rawJid = msg?.key?.participant || jid || '';
         let numStr = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
 
         if (numStr.length === 12 && numStr.startsWith('91')) {
@@ -51,7 +41,7 @@ function extractClean10DigitPhone(jid, msg) {
             return numStr;
         }
 
-        if (msg && msg.key && msg.key.remoteJid) {
+        if (msg?.key?.remoteJid) {
             let altStr = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
             if (altStr.length === 12 && altStr.startsWith('91')) return altStr.substring(2);
             if (altStr.length === 10 && /^[6-9]/.test(altStr)) return altStr;
@@ -64,7 +54,7 @@ function extractClean10DigitPhone(jid, msg) {
 
         return numStr.slice(-10);
     } catch (e) {
-        return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+        return (jid || '').split('@')[0].replace(/[^0-9]/g, '').slice(-10);
     }
 }
 
@@ -83,29 +73,25 @@ async function startBot() {
     try {
         if (sock) {
             try { 
-                sock.ev.removeAllListeners(); 
-                sock.end(undefined);
+                sock.ev.removeAllListeners();
+                sock.end();
             } catch (e) {}
             sock = null;
         }
 
-        isConnecting = true;
+        currentQrCode = '';
+        isBotReady = false;
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
+        
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
         sock = makeWASocket({
             auth: state,
-            version: [2, 3000, 1017531287],
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: true,
-            browser: Browsers.macOS('Desktop'),
-            
-            msgRetryCounterCache,
-            retryRequestDelayMs: 1000,
-            maxMsgRetryCount: 5,
-
+            markOnlineOnConnect: false,
+            browser: Browsers.ubuntu('Chrome'),
             getMessage: async (key) => {
                 if (messageCache.has(key.id)) return messageCache.get(key.id);
                 return { conversation: 'JRD Public School' };
@@ -119,35 +105,28 @@ async function startBot() {
 
             if (qr) {
                 currentQrCode = qr;
-                isConnecting = false;
-                console.log('✅ 🔥 नया QR Code तैयार है! /qr पर जाएँ।');
-                qrcodeTerminal.generate(qr, { small: true });
+                console.log('✅ 🔥 नया QR Code तुरंत जनरेट हो गया!');
             }
 
             if (connection === 'close') {
                 isBotReady = false;
-                isConnecting = false;
+                currentQrCode = '';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-
                 console.log('⚠️ कनेक्शन बंद हुआ | StatusCode:', statusCode);
 
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-                    console.log('❌ सेशन लॉगआउट हुआ। नया QR जनरेट हो रहा है...');
+                    console.log('❌ सेशन लॉगआउट हुआ। फ्रेश QR बन रहा है...');
                     clearAuthFolder();
-                    setTimeout(() => startBot(), 1500);
+                    setTimeout(() => startBot(), 1000);
                 } else {
-                    setTimeout(() => startBot(), 2500);
+                    setTimeout(() => startBot(), 3000);
                 }
             } else if (connection === 'open') {
-                isConnecting = false;
                 currentQrCode = '';
-                
-                setTimeout(() => {
-                    isBotReady = true;
-                    console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Active & E2EE / Phone Fixed! ');
-                    console.log('=============================================\n');
-                }, 3000);
+                isBotReady = true;
+                console.log('\n=============================================');
+                console.log(' 🎉 JRD VIP Bot Successfully Connected! ');
+                console.log('=============================================\n');
             }
         });
 
@@ -231,8 +210,8 @@ async function startBot() {
         });
 
     } catch (err) {
-        isConnecting = false;
         console.error('❌ startBot error:', err.message);
+        setTimeout(() => startBot(), 2000);
     }
 }
 
@@ -347,9 +326,10 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
+// 🌐 QR कोड पेज (तत्काल जनरेशन)
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ बॉट कनेक्टेड है!</h2>');
     }
     if (!currentQrCode) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
@@ -361,19 +341,17 @@ app.get('/qr', (req, res) => {
             <p>अपने व्हाट्सएप से इस QR कोड को स्कैन करें:</p>
             <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 2px solid #333; padding: 10px; border-radius: 10px; width: 300px; height: 300px;"/>
             <br>
-            <p><a href="/reset-qr" style="color:red; font-weight:bold;">🔄 QR न दिखे तो यहाँ क्लिक करें (Force Reset)</a></p>
+            <p><a href="/reset-qr" style="color:red; font-weight:bold;">🔄 Force Reset Session (नया QR)</a></p>
         </div>
     `);
 });
 
-// 🔄 इमरजेंसी फ्रेश QR रीसेट राउट
 app.get('/reset-qr', (req, res) => {
     clearAuthFolder();
-    isBotReady = false;
-    isConnecting = false;
     currentQrCode = '';
+    isBotReady = false;
     setTimeout(() => startBot(), 1000);
-    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 5 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
+    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:blue;">🧹 सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr खोलें</a>।</h2>');
 });
 
 app.get('/', (req, res) => {
