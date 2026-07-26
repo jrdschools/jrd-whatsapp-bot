@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -31,23 +31,45 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🎯 शुद्ध 10-अंकों का भारतीय मोबाइल नंबर निकालने का सटीक फ़ंक्शन (Fixes Random Number Issue)
+// 🎯 WhatsApp LID या कचरा नंबर हटाकर असली 10-अंकों का मोबाइल नंबर निकालने का बुलेटप्रूफ फ़ंक्शन
 function extractClean10DigitPhone(jid, msg) {
     try {
-        let rawJid = msg?.key?.participant || msg?.key?.remoteJid || jid || '';
-        let numStr = rawJid.split('@')[0].replace(/[^0-9]/g, '');
-
-        if (numStr.startsWith('91') && numStr.length === 12) {
-            return numStr.substring(2); // '91' हटाकर शुद्ध 10 अंक देगा
+        let rawJid = '';
+        
+        // 1. यदि participant मौजूद हो (ग्रुप या LID केस में)
+        if (msg && msg.key && msg.key.participant) {
+            rawJid = msg.key.participant;
+        } else {
+            rawJid = jid || '';
         }
-        if (numStr.length === 10) {
+
+        // केवल संख्याएँ निकालें
+        let numStr = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+
+        // यदि 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
+        if (numStr.length === 12 && numStr.startsWith('91')) {
+            return numStr.substring(2);
+        }
+
+        // यदि शुद्ध 10-अंकों का भारतीय नंबर है (6,7,8,9 से शुरू होने वाला)
+        if (numStr.length === 10 && /^[6-9]/.test(numStr)) {
             return numStr;
         }
-        if (numStr.length > 10) {
-            if (numStr.startsWith('91')) return numStr.slice(2, 12);
-            return numStr.slice(0, 10);
+
+        // यदि JID में LID आ गया हो, तो alternative remoteJid से ढूँढें
+        if (msg && msg.key && msg.key.remoteJid) {
+            let altStr = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+            if (altStr.length === 12 && altStr.startsWith('91')) return altStr.substring(2);
+            if (altStr.length === 10 && /^[6-9]/.test(altStr)) return altStr;
         }
-        return numStr;
+
+        // बैकअप लॉजिक
+        if (numStr.length > 10) {
+            let matches = numStr.match(/[6-9]\d{9}/);
+            if (matches && matches[0]) return matches[0];
+        }
+
+        return numStr.slice(-10);
     } catch (e) {
         return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
     }
@@ -57,7 +79,7 @@ function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
             fs.rmSync(AUTH_FOLDER, { recursive: true, force: true });
-            console.log('🧹 Auth Folder पूरी तरह साफ़ कर दिया गया!');
+            console.log('🧹 Auth Folder साफ़ कर दिया गया!');
         }
     } catch (e) {
         console.error('❌ Error clearing Auth Folder:', e.message);
@@ -77,30 +99,22 @@ async function startBot() {
         console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
-        let latestVersion = [2, 3000, 1017531287];
-        try {
-            const fetched = await fetchLatestBaileysVersion();
-            if (fetched && fetched.version) latestVersion = fetched.version;
-        } catch (e) {}
-
         sock = makeWASocket({
             auth: state,
-            version: latestVersion,
+            version: [2, 3000, 1017531287],
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: false,
+            markOnlineOnConnect: true,
             browser: Browsers.macOS('Desktop'),
             
             msgRetryCounterCache,
-            retryRequestDelayMs: 2000,
+            retryRequestDelayMs: 1000,
             maxMsgRetryCount: 5,
 
             getMessage: async (key) => {
-                if (messageCache.has(key.id)) {
-                    return messageCache.get(key.id);
-                }
-                return { conversation: 'JRD Public School Notification' };
+                if (messageCache.has(key.id)) return messageCache.get(key.id);
+                return { conversation: 'JRD Public School' };
             }
         });
 
@@ -135,9 +149,9 @@ async function startBot() {
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
-                    console.log(' 🎉 JRD VIP Bot Connected & E2EE Synced! ');
+                    console.log(' 🎉 JRD VIP Bot Active & Phone Extractor Fixed! ');
                     console.log('=============================================\n');
-                }, 5000);
+                }, 3000);
             }
         });
 
@@ -151,12 +165,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 नंबर एक्सट्रेक्ट करने का सही तरीका
+            // 🎯 शुद्ध 10-अंकों का असली मोबाइल नंबर निकाला जा रहा है
             const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | शुद्ध 10-अंकों का नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+            console.log(`📱 मैसेज आया | निष्पादित शुद्ध मोबाइल नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
@@ -191,13 +205,13 @@ async function startBot() {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
                     } else {
-                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।`);
+                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।`);
                     }
                     return;
                 }
 
                 if (isGreeting) {
-                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत (Registered) है ✅_`;
+                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे के नाम के आगे **#** लगाकर भेजें (उदा: *#Aditya*)\n\n_आपका नंबर पंजीकृत है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
@@ -238,7 +252,6 @@ async function sendReply(jid, text) {
     }
 }
 
-// 📄 OFFICIAL BRANDED SCHOOL PDF RECEIPT
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -397,7 +410,7 @@ async function processQueue() {
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
-                // 2. 1.5 सेकंड रुक कर PDF
+                // 2. PDF रसीद
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
@@ -407,7 +420,7 @@ async function processQueue() {
                 break;
             }
 
-            await new Promise(res => setTimeout(res, 2500));
+            await new Promise(res => setTimeout(res, 2000));
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
