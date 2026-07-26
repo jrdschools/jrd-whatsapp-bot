@@ -27,7 +27,7 @@ app.use((req, res, next) => {
 
 const GOOGLE_SCRIPT_URL = AUTH_BACKUP_SCRIPT_URL;
 
-// 🔑 "Waiting for this message" को रोकने के लिए मैसेज कैश और री-ट्राई स्टोर
+// 🔑 "Waiting for this message" रोकने के लिए मैपिंग व री-ट्राई कैश
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
@@ -133,8 +133,9 @@ async function startBot() {
             printQRInTerminal: false,
             syncFullHistory: false,
             markOnlineOnConnect: true,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'),
 
+            // 🛡️ WAITING ERROR FIX: री-ट्राई काउंटर और मैसेज डिक्रिप्शन कैश
             msgRetryCounterCache,
             retryRequestDelayMs: 250,
             maxMsgRetryCount: 5,
@@ -166,7 +167,7 @@ async function startBot() {
                 isConnecting = false;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '| Reconnect:', shouldReconnect);
+                console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | دوبارہ कनेक्ट करें:', shouldReconnect);
                 if (shouldReconnect) {
                     setTimeout(() => startBot(), 5000);
                 } else {
@@ -188,6 +189,7 @@ async function startBot() {
             }
         });
 
+        // 📩 आने वाले मैसेज हैंडल करना
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             const msg = messages[0];
@@ -204,6 +206,7 @@ async function startBot() {
 
             console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${rawText}"`);
 
+            // 🎯 1. हेल्प एवं वेलकम मेन्यू
             if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
                 const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें।\nउदा: *#Aditya* या *#EN12345*\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
                 await sendReply(jid, menuText);
@@ -227,6 +230,7 @@ async function startBot() {
                 return;
             }
 
+            // 💬 2. आम बातचीत (Casual Talk)
             const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
             const hasHashTag = rawText.includes('#');
 
@@ -239,6 +243,7 @@ async function startBot() {
                 return;
             }
 
+            // 🔍 3. # TAG के साथ खोज
             const query = rawText.replace(/#/g, '').trim();
             if (query.length >= 2) {
                 try {
@@ -268,6 +273,7 @@ async function startBot() {
     }
 }
 
+// ✉️ रिप्लाई भेजने का हेल्पर
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
@@ -281,6 +287,7 @@ async function sendReply(jid, text) {
     }
 }
 
+// 📄 PDF रसीद जनरेट करके भेजने वाला फ़ंक्शन
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -346,6 +353,7 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
+// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -368,6 +376,7 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
+// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -383,7 +392,8 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (sock && (isBotReady || sock.user)) {
-                if (item.type === 'PDF_RECEIPT') {
+                // PDF_RECEIPT या FEE_RECEIPT दोनों पे-लोड हैंडल होंगे
+                if (item.type === 'PDF_RECEIPT' || item.type === 'FEE_RECEIPT') {
                     await sendFeePdfReceipt(jid, item);
                     console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
                 } else {
@@ -418,6 +428,7 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
+// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
