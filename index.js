@@ -54,12 +54,12 @@ async function startBot() {
             syncFullHistory: false,
             markOnlineOnConnect: true,
             browser: Browsers.ubuntu('Chrome'),
-            
+
             // 🛡️ WAITING ERROR FIX: री-ट्राई काउंटर और मैसेज डिक्रिप्शन कैश
             msgRetryCounterCache,
             retryRequestDelayMs: 250,
             maxMsgRetryCount: 5,
-            
+
             getMessage: async (key) => {
                 if (messageCache.has(key.id)) {
                     return messageCache.get(key.id);
@@ -114,10 +114,10 @@ async function startBot() {
             } catch (e) {}
 
             const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
-            const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
-            const lowerText = text.toLowerCase();
+            const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+            const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
+            console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${rawText}"`);
 
             // 🎯 1. हेल्प एवं वेलकम मेन्यू
             if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
@@ -134,7 +134,8 @@ async function startBot() {
 4️⃣ *विद्यालय का पता व लोकेशन*
 
 🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*
-बस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।
+बच्चे का **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें।
+उदा: *#Aditya* या *#EN12345*
 
 _नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_
 ━━━━━━━━━━━━━━━━━━━━━━━`;
@@ -163,17 +164,25 @@ Google Maps पर खोजें: *JRD Public School Marui Varanasi*`);
                 return;
             }
 
-            // 💬 2. आम बातचीत (Casual Talk)
+            // 💬 2. आम बातचीत (Casual Talk) — सामान्य मैसेज पर सिर्फ वेलकम, कोई डिटेल नहीं
             const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
-            if (casualWords.some(word => lowerText.includes(word))) {
-                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए सीधे उसका **नाम** लिखकर भेजें। मुख्य मेन्यू के लिए **Menu** लिखें।`);
+            const hasHashTag = rawText.includes('#');
+
+            if (!hasHashTag) {
+                if (casualWords.some(word => lowerText.includes(word))) {
+                    await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए उसका **नाम** या **Enrolment No** आगे **#** लगाकर भेजें (उदा: *#Aditya*)। मुख्य मेन्यू के लिए **Menu** लिखें।`);
+                    return;
+                }
+                // 🔒 कोई भी सामान्य टेक्स्ट (# के बिना) — कोई डिटेल नहीं, सिर्फ वेलकम/गाइड मैसेज
+                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nबच्चे की फीस/प्रोफाइल डिटेल देखने के लिए उसका **नाम** या **Enrolment No** के आगे **#** लगाकर भेजें (उदा: *#Aditya* या *#EN12345*)।\n\nमुख्य मेन्यू के लिए **Menu** लिखें।`);
                 return;
             }
 
-            // 🔍 3. DOUBLE FILTER SEARCH ENGINE
-            if (text.length >= 2) {
+            // 🔍 3. # TAG के साथ आया मैसेज — यही सर्च होगा (# हटाकर बाकी हिस्सा query है)
+            const query = rawText.replace(/#/g, '').trim();
+            if (query.length >= 2) {
                 try {
-                    const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(text)}`;
+                    const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(query)}`;
                     const response = await axios.get(apiUrl, { timeout: 15000 });
 
                     if (response.data && response.data.status === 'success') {
@@ -190,13 +199,15 @@ _यदि आपने नया नंबर लिया है, तो क�
                     else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
                         await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*
 
-छात्र का नाम *"${text}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।
+छात्र का नाम *"${query}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।
 
-कृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
+कृपया सही नाम अथवा Enrolment No # के साथ लिखकर भेजें (उदा: *#Aditya*)।`);
                     }
                 } catch (error) {
                     console.error('Database Search Error:', error.message);
                 }
+            } else {
+                await sendReply(jid, `कृपया # के बाद बच्चे का **नाम** या **Enrolment No** भी लिखें। उदा: *#Aditya*`);
             }
         });
 
@@ -261,7 +272,7 @@ async function sendFeePdfReceipt(jid, data) {
             doc.text(`Class      : ${data.className || 'N/A'}`);
             doc.text(`Session    : ${data.session || '2026-27'}`);
             doc.moveDown(0.5);
-            
+
             doc.text('-------------------------------------------');
             doc.text(`Amount Paid: Rs. ${data.paid || 0}/-`, { bold: true });
             doc.text('-------------------------------------------');
@@ -370,7 +381,7 @@ async function processQueue() {
                     }
                     console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
                 }
-                
+
                 messageQueue.shift();
             } else {
                 console.log('⚠️ बॉट सिंक हो रहा है, 2 सेकंड बाद पुनः प्रयास करेगा...');
