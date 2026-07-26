@@ -4,16 +4,17 @@ const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
 const axios = require('axios');
-const PDFDocument = require('pdfkit');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
 
+// 🚀 Rate Limiting और Payload Lock हटाने के लिए बॉडी पार्सर
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// CORS और हेडर अलाउ करने के लिए
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -26,6 +27,7 @@ let sock;
 let currentQrCode = '';
 let isBotReady = false;
 
+// 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -56,6 +58,7 @@ async function startBot() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             console.log('⚠️ कनेक्शन बंद हुआ, कारण:', lastDisconnect?.error?.message || 'unknown', '(status:', statusCode, ') | दोबारा कनेक्ट करें:', shouldReconnect);
+            
             if (shouldReconnect) {
                 setTimeout(() => startBot(), 5000);
             } else {
@@ -63,7 +66,7 @@ async function startBot() {
                 try {
                     const authPath = path.join(process.cwd(), 'auth_info_baileys');
                     if (fs.existsSync(authPath)) {
-                        fs.rmSync(authPath, { recursive: true });
+                        fs.rmSync(authPath, { recursive: true, force: true });
                         console.log('✅ Auth फ़ोल्डर साफ हो गया। दोबारा QR generate हो रहा है...');
                     }
                 } catch (err) {
@@ -80,6 +83,7 @@ async function startBot() {
         }
     });
 
+    // 📩 आने वाले मैसेज हैंडल करना
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
@@ -98,8 +102,25 @@ async function startBot() {
 
         console.log(`📱 मैसेज प्राप्त हुआ | शुद्ध 10-अंकों का नंबर : [${senderPhone}] | टेक्स्ट : "${text}"`);
 
+        // 🎯 1. हेल्प एवं वेलकम मेन्यू
         if (['hi', 'hello', 'नमस्ते', 'menu', 'start'].includes(lowerText)) {
-            const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।\n\n_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_\n━━━━━━━━━━━━━━━━━━━━━━━`;
+            const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*
+📍 *मरुई, वाराणसी (उ.प्र.)*
+━━━━━━━━━━━━━━━━━━━━━━━
+🙏 *अभिभावक डिजिटल सेवा केंद्र*
+
+सूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:
+
+1️⃣ *नया एडमिशन (सत्र 2026-27)*
+2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*
+3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*
+4️⃣ *विद्यालय का पता व लोकेशन*
+
+🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*
+बस अपने बच्चे का **नाम** (उदा: *Aditya* या *Ritesh*) सीधे लिखकर भेजें।
+
+_नोट: जानकारी केवल पंजीकृत (Registered) मोबाइल नंबर पर ही उपलब्ध होगी।_
+━━━━━━━━━━━━━━━━━━━━━━━`;
             await sendReply(jid, menuText);
             return;
         }
@@ -117,29 +138,45 @@ async function startBot() {
             return;
         }
         if (lowerText === '4') {
-            await sendReply(jid, `📍 *विद्यालय लोकेशन:*\nJRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)\n\n🗺 *गूगल मैप्स पर ढूँढें:*\nGoogle Maps पर खोजें: *JRD Public School Marui Varanasi*`);
+            await sendReply(jid, `📍 *विद्यालय लोकेशन:*
+JRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)
+
+🗺 *गूगल मैप्स पर ढूँढें:*
+Google Maps पर खोजें: *JRD Public School Marui Varanasi*`);
             return;
         }
 
+        // 💬 2. आम बातचीत (Casual Talk)
         const casualWords = ['कैसे हो', 'कैसे हैं', 'kaise ho', 'kaise hain', 'good morning', 'good afternoon', 'thanks', 'thank you', 'धन्यवाद', 'ok', 'okay', 'ठीक है', 'जय हिंद', 'राम राम', 'सुप्रभात', 'thik hai', 'kya hal hai'];
         if (casualWords.some(word => lowerText.includes(word))) {
             await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे का फ़ीस बहीखाता देखने के लिए सीधे उसका **नाम** लिखकर भेजें। मुख्य मेन्यू के लिए **Menu** लिखें।`);
             return;
         }
 
+        // 🔍 3. DOUBLE FILTER SEARCH ENGINE
         if (text.length >= 2) {
             try {
-                const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(text)}`;
+                const cleanQuery = text.replace(/^#/, '').trim();
+                const apiUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${senderPhone}&query=${encodeURIComponent(cleanQuery)}`;
                 const response = await axios.get(apiUrl, { timeout: 15000 });
 
                 if (response.data && response.data.status === 'success') {
                     await sendStudentProfileCard(jid, response.data.data);
                 }
                 else if (response.data && response.data.status === 'unregistered_number') {
-                    await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।\n_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
+                    await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*
+
+आपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।
+
+सुरक्षा कारणों से छात्र विवरण केवल पंजीकृत (Registered) अभिभावक के नंबर पर ही भेजा जाता है।
+_यदि आपने नया नंबर लिया है, तो कृपया विद्यालय कार्यालय में संपर्क करें।_`);
                 }
                 else if (response.data && (response.data.status === 'student_not_associated_with_number' || response.data.status === 'not_found')) {
-                    await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम *"${text}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।\n\nकृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
+                    await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*
+
+छात्र का नाम *"${cleanQuery}"* आपके पंजीकृत मोबाइल नंबर (*${senderPhone}*) से जुड़ा हुआ नहीं पाया गया।
+
+कृपया सही नाम अथवा Enrolment No लिखकर भेजें।`);
                 }
             } catch (error) {
                 console.error('Database Search Error:', error.message);
@@ -148,6 +185,7 @@ async function startBot() {
     });
 }
 
+// ✉️ सामान्य रिप्लाई भेजने का हेल्पर
 async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
@@ -158,70 +196,64 @@ async function sendReply(jid, text) {
     }
 }
 
-async function sendFeePdfReceipt(jid, data) {
-    return new Promise((resolve, reject) => {
-        try {
-            const doc = new PDFDocument({ size: 'A6', margin: 20 });
-            let buffers = [];
+// 📄 सुरक्षित टेक्स्ट-बेस्ड फीस रसीद (एन्क्रिप्शन एरर मुक्त)
+async function sendFeeTextReceipt(jid, data) {
+    const cleanDet = (data.details || '').replace(/<br>/g, "\n");
+    const receiptText = `🏫 *J.R.D. PUBLIC SCHOOL*
+📍 *मरुई, वाराणसी (उ.प्र.)*
+🧾 *आधिकारिक फ़ीस जमा रसीद*
+━━━━━━━━━━━━━━━━━━━━━━━
+🆔 *रसीद सं (Receipt No):* ${data.rid || 'N/A'}
+👤 *छात्र का नाम:* *${data.name || 'N/A'}*
+🏫 *कक्षा:* ${data.className || 'N/A'}
+📅 *सत्र:* ${data.session || '2026-27'}
 
-            doc.on('data', buffers.push.bind(buffers));
-            doc.on('end', async () => {
-                try {
-                    const pdfBuffer = Buffer.concat(buffers);
-                    if (sock && isBotReady) {
-                        await sock.sendMessage(jid, {
-                            document: pdfBuffer,
-                            mimetype: 'application/pdf',
-                            fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf`,
-                            caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की फीस जमा रसीद।`
-                        });
-                    }
-                    resolve();
-                } catch (e) {
-                    reject(e);
-                }
-            });
+💰 *जमा राशि (Paid Amount): ₹${data.paid || 0}/-*
+━━━━━━━━━━━━━━━━━━━━━━━
+📊 *फ़ीस विवरण Breakdown:*
+${cleanDet || 'शुल्क जमा'}
 
-            doc.fontSize(14).text('J.R.D. PUBLIC SCHOOL', { align: 'center', bold: true });
-            doc.fontSize(9).text('Marui, Varanasi (U.P.)', { align: 'center' });
-            doc.moveDown(0.5);
-            doc.fontSize(10).text('-------------------------------------------', { align: 'center' });
-            doc.fontSize(11).text('OFFICIAL FEE RECEIPT', { align: 'center' });
-            doc.text('-------------------------------------------', { align: 'center' });
-            doc.moveDown(0.5);
+━━━━━━━━━━━━━━━━━━━━━━━
+✨ *धन्यवाद!* - JRD Public School Management`;
 
-            doc.fontSize(9);
-            doc.text(`Receipt No : ${data.rid || 'N/A'}`);
-            doc.text(`Student    : ${data.name || 'N/A'}`);
-            doc.text(`Class      : ${data.className || 'N/A'}`);
-            doc.text(`Session    : ${data.session || '2026-27'}`);
-            doc.moveDown(0.5);
-            
-            doc.text('-------------------------------------------');
-            doc.text(`Amount Paid: Rs. ${data.paid || 0}/-`, { bold: true });
-            doc.text('-------------------------------------------');
-            doc.moveDown(0.5);
-
-            doc.text('Details / Breakdown:');
-            const cleanDetails = (data.details || '').replace(/<br>/g, '\n');
-            doc.fontSize(8).text(cleanDetails);
-
-            doc.moveDown(1);
-            doc.fontSize(8).text('Thank you! JRD Public School Management.', { align: 'center', italic: true });
-
-            doc.end();
-        } catch (err) {
-            reject(err);
-        }
-    });
+    await sendReply(jid, receiptText);
 }
 
 async function sendStudentProfileCard(jid, s) {
-    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\`\n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}\n• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
+    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*
+🏫 *JRD Public School, Marui*
+📅 *सत्र (Session):* ${s.session || '2026-27'}
+━━━━━━━━━━━━━━━━━━━━━━━
+🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\`
+📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}
+🔢 *Roll No:* ${s.roll_no || 'N/A'}
+
+👤 *छात्र का नाम:* *${s.name}*
+👨‍👦 *पिता का नाम:* ${s.father}
+👩‍👦 *माता का नाम:* ${s.mother}
+🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})
+
+💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}
+
+📊 *भुगतान/जमा विवरण:*
+${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}
+
+⚠️ *बकाया शुल्क विवरण:*
+${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*
+• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}
+• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}
+---------------------------------------
+🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*
+━━━━━━━━━━━━━━━━━━━━━━━
+_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
 
+// 🌐 QR कोड Endpoint
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट पहले से कनेक्टेड है, QR की ज़रूरत नहीं।</h2>');
@@ -244,12 +276,15 @@ app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot is Running! Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
 
+// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
 async function processQueue() {
     if (isProcessingQueue || messageQueue.length === 0) return;
     isProcessingQueue = true;
+
+    let processedCount = 0;
 
     while (messageQueue.length > 0) {
         const item = messageQueue.shift();
@@ -266,8 +301,8 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (item.type === 'FEE_RECEIPT') {
-                await sendFeePdfReceipt(jid, item);
-                console.log(`✅ [PDF RECEIPT] भेजी गई -> ${formattedNumber}`);
+                await sendFeeTextReceipt(jid, item);
+                console.log(`✅ [FEE RECEIPT] भेजी गई -> ${formattedNumber}`);
             } else {
                 let textToSend = item.message;
                 if (!textToSend || textToSend.trim() === '') {
@@ -279,7 +314,15 @@ async function processQueue() {
                 console.log(`✅ [${item.type}] संदेश सफलतापूर्वक भेजा गया -> ${formattedNumber}`);
             }
 
-            await new Promise(res => setTimeout(res, 2000));
+            processedCount++;
+
+            const randomDelay = Math.floor(Math.random() * 2000) + 2000;
+            await new Promise(res => setTimeout(res, randomDelay));
+
+            if (processedCount % 20 === 0) {
+                console.log('⏸️ व्हाट्सएप सुरक्षा: 10 सेकंड का ब्रेक लिया जा रहा है...');
+                await new Promise(res => setTimeout(res, 10000));
+            }
 
         } catch (err) {
             console.error(`❌ संदेश भेजने में त्रुटि (${item.number}):`, err.message);
@@ -289,7 +332,7 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 🎯 SINGLE ENDPOINT FOR QUEUEING (Google Apps Script को यह ही call करना चाहिए)
+// 🎯 FLEXIBLE RECEIVER ENDPOINT
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -318,15 +361,26 @@ app.post('/enqueue-message', (req, res) => {
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
 });
 
-// ❌ DEPRECATED - इस endpoint को बंद किया जा रहा है (duplicate SMS की समस्या के कारण)
-app.post('/send-whatsapp', (req, res) => {
-    return res.status(410).json({ 
-        status: 'deprecated', 
-        message: 'यह endpoint बंद कर दिया गया है। कृपया सिर्फ /enqueue-message का उपयोग करें।',
-        instruction: 'Use /enqueue-message endpoint instead'
-    });
+app.post('/send-whatsapp', async (req, res) => {
+    const body = req.body || {};
+    const targetPhone = body.number || body.phone || body.mobile;
+    const message = body.message;
+
+    if (!targetPhone || !message) return res.status(400).json({ status: 'error', message: 'Missing params' });
+
+    try {
+        if (!sock || !isBotReady) return res.status(503).json({ status: 'error', message: 'Bot not ready' });
+
+        let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
+        if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
+        await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
+        return res.status(200).json({ status: 'success' });
+    } catch (error) {
+        return res.status(500).json({ status: 'error', message: error.toString() });
+    }
 });
 
+// 🛠️ PORT DYNAMIC FIX
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Secure VIP Bot running on port ${PORT}`));
 startBot();
@@ -339,4 +393,3 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-
