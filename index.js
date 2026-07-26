@@ -126,7 +126,19 @@ async function startBot() {
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
             // 🎯 गार्जियन के मोबाइल नंबर का सीधा 10-अंक एक्सट्रैक्शन
-            const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+// 🎯 LID / कचरा ID हटाकर असली 10-डिजिट मोबाइल नंबर पकड़ना
+let rawJid = msg.key.participant || msg.key.remoteJid || jid || '';
+let cleanDigits = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+
+let senderPhone = '';
+if (cleanDigits.length === 12 && cleanDigits.startsWith('91')) {
+    senderPhone = cleanDigits.substring(2); // '91' हटाकर शुद्ध 10 अंक देगा -> 9792649799
+} else if (cleanDigits.length > 10) {
+    let match = cleanDigits.match(/[6-9]\d{9}/);
+    senderPhone = match ? match[0] : cleanDigits.slice(-10);
+} else {
+    senderPhone = cleanDigits;
+}           
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
