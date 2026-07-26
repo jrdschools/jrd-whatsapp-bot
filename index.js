@@ -6,6 +6,14 @@ const express = require('express');
 const axios = require('axios');
 const PDFDocument = require('pdfkit');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
+const unzipper = require('unzipper');
+
+const AUTH_FOLDER = 'auth_info_baileys';
+// 🔴 IMPORTANT: apna Google Apps Script wala hi URL yahan daalo (backup/restore ke liye)
+const AUTH_BACKUP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
 const app = express();
 
@@ -31,6 +39,78 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
+// 📦 पूरे auth_info_baileys फ़ोल्डर को ZIP बनाकर base64 में Google Sheet पर भेजना
+// (सिर्फ़ creds.json नहीं — session/sender-key/pre-key सारी फ़ाइलें, यही "Waiting" की असली वजह थी)
+async function backupAuthFolderToCloud() {
+    try {
+        if (!fs.existsSync(AUTH_FOLDER)) return;
+        const zipPath = path.join('/tmp', 'auth_backup.zip');
+
+        await new Promise((resolve, reject) => {
+            const output = fs.createWriteStream(zipPath);
+            const archive = archiver('zip', { zlib: { level: 9 } });
+            output.on('close', resolve);
+            archive.on('error', reject);
+            archive.pipe(output);
+            archive.directory(AUTH_FOLDER, false);
+            archive.finalize();
+        });
+
+        const zipBuffer = fs.readFileSync(zipPath);
+        const base64Zip = zipBuffer.toString('base64');
+
+        await axios.post(AUTH_BACKUP_SCRIPT_URL, {
+            action: 'save_auth_zip',
+            key: 'SESSION_ZIP_DATA',
+            value: base64Zip
+        }, { timeout: 20000 });
+
+        console.log('☁️ पूरा auth_info_baileys फ़ोल्डर (ZIP) क्लाउड में बैकअप हो गया।');
+    } catch (err) {
+        console.error('❌ Auth folder backup error:', err.message);
+    }
+}
+
+// 📦 शुरुआत में क्लाउड से पूरा फ़ोल्डर वापस डाउनलोड करके extract करना
+async function restoreAuthFolderFromCloud() {
+    try {
+        if (fs.existsSync(AUTH_FOLDER) && fs.readdirSync(AUTH_FOLDER).length > 0) {
+            console.log('ℹ️ लोकल auth_info_baileys फ़ोल्डर पहले से मौजूद है, restore स्किप।');
+            return;
+        }
+
+        const res = await axios.get(`${AUTH_BACKUP_SCRIPT_URL}?action=get_auth_zip&key=SESSION_ZIP_DATA`, { timeout: 15000 });
+        if (!res.data || !res.data.value) {
+            console.log('ℹ️ क्लाउड में कोई पुराना बैकअप नहीं मिला, नया QR स्कैन होगा।');
+            return;
+        }
+
+        const zipBuffer = Buffer.from(res.data.value, 'base64');
+        const zipPath = path.join('/tmp', 'auth_restore.zip');
+        fs.writeFileSync(zipPath, zipBuffer);
+
+        if (!fs.existsSync(AUTH_FOLDER)) fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(zipPath)
+                .pipe(unzipper.Extract({ path: AUTH_FOLDER }))
+                .on('close', resolve)
+                .on('error', reject);
+        });
+
+        console.log('✅ क्लाउड से पूरा auth_info_baileys फ़ोल्डर सफलतापूर्वक restore हो गया — session keys सुरक्षित हैं!');
+    } catch (err) {
+        console.error('❌ Auth folder restore error:', err.message);
+    }
+}
+
+// हर 60 सेकंड में पूरे फ़ोल्डर का ऑटो-बैकअप (creds.update पर तुरंत भी होगा)
+let backupTimer = null;
+function scheduleAuthBackup() {
+    if (backupTimer) return;
+    backupTimer = setInterval(backupAuthFolderToCloud, 60 * 1000);
+}
+
 // 🚀 Baileys के साथ WhatsApp कनेक्शन शुरू करना
 async function startBot() {
     if (isConnecting) return;
@@ -42,7 +122,8 @@ async function startBot() {
             sock = null;
         }
 
-        const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+        await restoreAuthFolderFromCloud();
+        const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
         const { version } = await fetchLatestBaileysVersion();
         console.log('ℹ️ WhatsApp Web version इस्तेमाल हो रहा है:', version.join('.'));
 
@@ -68,7 +149,10 @@ async function startBot() {
             }
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', async () => {
+            await saveCreds();
+            backupAuthFolderToCloud(); // creds बदलते ही तुरंत पूरे फ़ोल्डर का बैकअप (await नहीं — bot ko block नहीं करना)
+        });
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -91,12 +175,18 @@ async function startBot() {
                     console.log('❌ Logged out. auth_info_baileys फ़ोल्डर हटाकर दोबारा QR स्कैन करना होगा।');
                 }
             } else if (connection === 'open') {
-                isBotReady = true;
                 isConnecting = false;
                 currentQrCode = '';
-                console.log('\n=============================================');
-                console.log(' JRD Enterprise VIP Bot Active & Secured! ');
-                console.log('=============================================\n');
+                scheduleAuthBackup();
+                backupAuthFolderToCloud(); // connect होते ही एक बार फ़ौरन फ़ुल बैकअप
+                // 🛡️ WAITING FIX: connection "open" होते ही turant messages allow नहीं करना —
+                // Signal session/app-state पूरी तरह sync होने के लिए थोड़ा wait देना ज़रूरी है
+                setTimeout(() => {
+                    isBotReady = true;
+                    console.log('\n=============================================');
+                    console.log(' JRD Enterprise VIP Bot Active & Secured! ');
+                    console.log('=============================================\n');
+                }, 5000);
             }
         });
 
