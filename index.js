@@ -31,6 +31,28 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
+// 🎯 शुद्ध 10-अंकों का भारतीय मोबाइल नंबर निकालने का सटीक फ़ंक्शन (Fixes Random Number Issue)
+function extractClean10DigitPhone(jid, msg) {
+    try {
+        let rawJid = msg?.key?.participant || msg?.key?.remoteJid || jid || '';
+        let numStr = rawJid.split('@')[0].replace(/[^0-9]/g, '');
+
+        if (numStr.startsWith('91') && numStr.length === 12) {
+            return numStr.substring(2); // '91' हटाकर शुद्ध 10 अंक देगा
+        }
+        if (numStr.length === 10) {
+            return numStr;
+        }
+        if (numStr.length > 10) {
+            if (numStr.startsWith('91')) return numStr.slice(2, 12);
+            return numStr.slice(0, 10);
+        }
+        return numStr;
+    } catch (e) {
+        return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+    }
+}
+
 function clearAuthFolder() {
     try {
         if (fs.existsSync(AUTH_FOLDER)) {
@@ -67,10 +89,9 @@ async function startBot() {
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: false, // 🛡️ Waiting Error Fix: Don't force online on connect
+            markOnlineOnConnect: false,
             browser: Browsers.macOS('Desktop'),
             
-            // 🛡️ WAITING ERROR FIX (Retry & Handshake Fix)
             msgRetryCounterCache,
             retryRequestDelayMs: 2000,
             maxMsgRetryCount: 5,
@@ -111,7 +132,6 @@ async function startBot() {
                 isConnecting = false;
                 currentQrCode = '';
                 
-                // 🔑 Keys सिंक होने के लिए 5 सेकंड का वार्म-अप
                 setTimeout(() => {
                     isBotReady = true;
                     console.log('\n=============================================');
@@ -131,11 +151,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            const senderPhone = jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+            // 🎯 नंबर एक्सट्रेक्ट करने का सही तरीका
+            const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | [${senderPhone}] : "${rawText}"`);
+            console.log(`📱 मैसेज आया | शुद्ध 10-अंकों का नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
