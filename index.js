@@ -1,6 +1,7 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
 const axios = require('axios');
 const PDFDocument = require('pdfkit');
@@ -23,39 +24,51 @@ app.use((req, res, next) => {
 });
 
 const messageCache = new Map();
+const msgRetryCounterCache = new Map();
+
 let sock = null;
 let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🎯 WhatsApp LID या कचरा नंबर हटाकर असली 10-अंकों का मोबाइल नंबर निकालने का सटीक फ़ंक्शन
+// 🎯 WhatsApp LID / कचरा इंटरनल नंबर हटाकर असली 10-अंकों का गार्जियन मोबाइल नंबर निकालने का सटीक लॉजिक
 function extractClean10DigitPhone(jid, msg) {
     try {
-        let rawJid = msg?.key?.participant || jid || '';
-        let numStr = rawJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+        let candidates = [];
 
-        if (numStr.length === 12 && numStr.startsWith('91')) {
-            return numStr.substring(2);
+        // 1. WhatsApp Remote JID से नंबर निकालें
+        if (jid) candidates.push(jid.split('@')[0].split(':')[0]);
+        // 2. Participant से निकालें
+        if (msg?.key?.participant) candidates.push(msg.key.participant.split('@')[0].split(':')[0]);
+        // 3. RemoteJID Alternate
+        if (msg?.key?.remoteJid) candidates.push(msg.key.remoteJid.split('@')[0].split(':')[0]);
+
+        for (let str of candidates) {
+            let digits = str.replace(/[^0-9]/g, '');
+            
+            // अगर 12 अंक हैं और 91 से शुरू हो रहा है (उदा: 919792649799)
+            if (digits.length === 12 && digits.startsWith('91')) {
+                let p = digits.substring(2);
+                if (/^[6-9]\d{9}$/.test(p)) return p; // शुद्ध 10 अंकों का गार्जियन नंबर
+            }
+            
+            // अगर शुद्ध 10 अंकों का नंबर है
+            if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
+                return digits;
+            }
+
+            // अगर स्ट्रिंग लंबी है, तो उसमें से 10 अंकों का मोबाइल नंबर ढूँढें
+            let match = digits.match(/[6-9]\d{9}/);
+            if (match && match[0]) {
+                return match[0];
+            }
         }
 
-        if (numStr.length === 10 && /^[6-9]/.test(numStr)) {
-            return numStr;
-        }
-
-        if (msg?.key?.remoteJid) {
-            let altStr = msg.key.remoteJid.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-            if (altStr.length === 12 && altStr.startsWith('91')) return altStr.substring(2);
-            if (altStr.length === 10 && /^[6-9]/.test(altStr)) return altStr;
-        }
-
-        if (numStr.length > 10) {
-            let matches = numStr.match(/[6-9]\d{9}/);
-            if (matches && matches[0]) return matches[0];
-        }
-
-        return numStr.slice(-10);
+        // फॉलबैक
+        let fallback = jid.split('@')[0].replace(/[^0-9]/g, '');
+        return fallback.slice(-10);
     } catch (e) {
-        return (jid || '').split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+        return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
     }
 }
 
@@ -76,35 +89,26 @@ async function startBot() {
 
     try {
         if (sock) {
-            try { 
-                sock.ev.removeAllListeners();
-                sock.end();
-            } catch (e) {}
+            try { sock.ev.removeAllListeners(); } catch (e) {}
             sock = null;
         }
 
-        console.log('⚡ Railway परिवेश में WhatsApp Bot स्टार्ट हो रहा है...');
+        console.log('⚡ WhatsApp Bot स्टार्ट हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
-        // 🔑 WhatsApp Web का ताज़ा वर्ज़न हासिल करना ताकि कनेक्शन ब्लॉक न हो
-        let version = [2, 3000, 1017531287];
-        try {
-            const fetched = await fetchLatestBaileysVersion();
-            if (fetched && fetched.version) version = fetched.version;
-        } catch (e) {}
-
         sock = makeWASocket({
-            version,
             auth: state,
+            version: [2, 3000, 1017531287],
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: true,
+            printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: false,
-            browser: Browsers.macOS('Desktop'), // Railway संगत ब्राउज़र फिंगरप्रिंट
-            connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 10000,
-            generateHighQualityLinkPreview: false,
+            markOnlineOnConnect: true,
+            browser: Browsers.macOS('Desktop'),
+            
+            msgRetryCounterCache,
+            retryRequestDelayMs: 1000,
+            maxMsgRetryCount: 5,
+
             getMessage: async (key) => {
                 if (messageCache.has(key.id)) return messageCache.get(key.id);
                 return { conversation: 'JRD Public School' };
@@ -119,15 +123,14 @@ async function startBot() {
             if (qr) {
                 currentQrCode = qr;
                 isConnecting = false;
-                console.log('✅ 🔥 Railway पर नया QR Code सफलता से बन गया!');
+                console.log('✅ 🔥 नया QR Code तैयार है! /qr पर जाएँ।');
+                qrcodeTerminal.generate(qr, { small: true });
             }
 
             if (connection === 'close') {
                 isBotReady = false;
                 isConnecting = false;
-                currentQrCode = '';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-                console.log('⚠️ कनेक्शन क्लोज हुआ | StatusCode:', statusCode);
 
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
                     console.log('❌ सेशन लॉगआउट हुआ। नया QR जनरेट हो रहा है...');
@@ -139,10 +142,13 @@ async function startBot() {
             } else if (connection === 'open') {
                 isConnecting = false;
                 currentQrCode = '';
-                isBotReady = true;
-                console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP Bot Successfully Connected on Railway! ');
-                console.log('=============================================\n');
+                
+                setTimeout(() => {
+                    isBotReady = true;
+                    console.log('\n=============================================');
+                    console.log(' 🎉 JRD VIP Bot Active & Real Guardian Phone Fixed! ');
+                    console.log('=============================================\n');
+                }, 3000);
             }
         });
 
@@ -156,11 +162,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
+            // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
             const senderPhone = extractClean10DigitPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | शुद्ध मोबाइल: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+            console.log(`📱 मैसेज आया | असली मोबाइल नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
@@ -228,7 +235,6 @@ async function startBot() {
     } catch (err) {
         isConnecting = false;
         console.error('❌ startBot error:', err.message);
-        setTimeout(() => startBot(), 3000);
     }
 }
 
@@ -345,7 +351,7 @@ async function sendStudentProfileCard(jid, s) {
 
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ बॉट कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">✅ बॉट कनेक्टेड है!</h2>');
     }
     if (!currentQrCode) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें या <a href="/reset-qr">यहाँ क्लिक करके फ्रेश QR बनाएँ</a>।</h2>');
@@ -357,18 +363,18 @@ app.get('/qr', (req, res) => {
             <p>अपने व्हाट्सएप से इस QR कोड को स्कैन करें:</p>
             <img src="${qrImageUrl}" alt="WhatsApp QR Code" style="border: 2px solid #333; padding: 10px; border-radius: 10px; width: 300px; height: 300px;"/>
             <br>
-            <p><a href="/reset-qr" style="color:red; font-weight:bold;">🔄 Force Reset Session (नया QR)</a></p>
+            <p><a href="/reset-qr" style="color:red; font-weight:bold;">🔄 QR न दिखे तो यहाँ क्लिक करें (Force Reset)</a></p>
         </div>
     `);
 });
 
 app.get('/reset-qr', (req, res) => {
     clearAuthFolder();
-    currentQrCode = '';
     isBotReady = false;
     isConnecting = false;
+    currentQrCode = '';
     setTimeout(() => startBot(), 1000);
-    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:blue;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr खोलें</a>।</h2>');
+    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 5 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
 
 app.get('/', (req, res) => {
@@ -397,9 +403,11 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *ऑनलाइन फ़ीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद सं:* ${item.rid || 'N/A'}\n💰 *जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\nधन्यवाद! - JRD Management`;
                 }
 
+                // 1. टेक्स्ट मैसेज
                 const sent = await sock.sendMessage(jid, { text: textToSend });
                 if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
 
+                // 2. PDF रसीद
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
