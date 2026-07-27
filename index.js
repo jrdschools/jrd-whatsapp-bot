@@ -560,15 +560,12 @@ app.get('/reset-qr', (req, res) => {
     setTimeout(() => startBot(), 1000);
     res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
-
 app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
-
 // ⚡ 4 मिनट में रेलवे सर्वर को अलाइव रखने वाला सेल्फ-पिंग
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
