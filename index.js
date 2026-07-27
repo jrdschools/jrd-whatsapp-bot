@@ -47,39 +47,52 @@ function forceClearAuthFolder() {
     }
 }
 
-// 🎯 व्हाट्सएप LID / डिवाइस ID हटाकर गार्जियन का असली 10-अंकों का नंबर निकालने का पक्का फ़ंक्शन
+// 🎯 WhatsApp LID को पूरी तरह ख़त्म करके गार्जियन का शुद्ध 10-अंकों का नंबर निकालने का बुलेटप्रूफ लॉजिक
 function extractGuardianPhone(jid, msg) {
     try {
-        let sources = [];
-        if (msg?.key?.participant) sources.push(msg.key.participant);
-        if (msg?.key?.remoteJid) sources.push(msg.key.remoteJid);
-        if (jid) sources.push(jid);
+        let rawCandidates = [];
 
-        for (let src of sources) {
+        // 1. मैसेज मैटाडेटा के अंदर से संभावित जेआईडी/नंबर निकालें
+        if (msg?.key?.participant) rawCandidates.push(msg.key.participant);
+        if (msg?.key?.remoteJid) rawCandidates.push(msg.key.remoteJid);
+        if (jid) rawCandidates.push(jid);
+        
+        // WhatsApp Context Info (अगर मैसेज का रिप्लाई या एक्सटेंडेड पेलोड हो)
+        const contextInfo = msg?.message?.extendedTextMessage?.contextInfo;
+        if (contextInfo?.participant) rawCandidates.push(contextInfo.participant);
+
+        for (let src of rawCandidates) {
+            if (!src) continue;
+
+            // अगर यह LID (@lid) वाली आईडी है, तो इसे सीधे छोड़ दें!
+            if (src.includes('@lid')) continue;
+
+            // केवल '@s.whatsapp.net' या सामान्य नंबर वाली स्ट्रिंग से अंक निकालें
             let clean = src.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-            
-            // 91 से शुरू होने वाला 12-अंकों का भारतीय नंबर
+
+            // यदि 12 अंक हैं और '91' (इंडिया कोड) से शुरू हो रहा है
             if (clean.length === 12 && clean.startsWith('91')) {
                 let p = clean.substring(2);
-                if (/^[6-9]\d{9}$/.test(p)) return p;
+                if (/^[6-9]\d{9}$/.test(p)) return p; // शुद्ध गार्जियन नंबर
             }
 
-            // शुद्ध 10 अंकों का नंबर (6,7,8,9 से शुरू)
+            // यदि शुद्ध 10 अंकों का भारतीय मोबाइल नंबर है (6-9 से शुरू)
             if (clean.length === 10 && /^[6-9]\d{9}$/.test(clean)) {
                 return clean;
             }
 
-            // स्ट्रिंग में मौजूद 10 अंकों का मोबाइल नंबर
+            // अगर स्ट्रिंग लंबी है तो उसमें से भारतीय मोबाइल नंबर ढूंढें
             let match = clean.match(/[6-9]\d{9}/);
             if (match && match[0]) {
                 return match[0];
             }
         }
 
-        let fallback = jid.split('@')[0].replace(/[^0-9]/g, '');
+        // फॉलबैक (अगर सब जगह LID आ गई हो तो आखिरी 10 अंक)
+        let fallback = (jid || '').split('@')[0].replace(/[^0-9]/g, '');
         return fallback.slice(-10);
     } catch (e) {
-        return jid.split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+        return (jid || '').split('@')[0].replace(/[^0-9]/g, '').slice(-10);
     }
 }
 
