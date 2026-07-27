@@ -242,7 +242,7 @@ async function startBot() {
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
             // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
-            const senderPhone = extractGuardianPhone(jid, msg);
+const senderPhone = await extractGuardianPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
