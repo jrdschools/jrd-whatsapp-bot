@@ -12,6 +12,36 @@ const path = require('path');
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
+// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की स्थायी मैपिंग
+// जानबूझकर auth_info_baileys से अलग रखी है ताकि QR रीसेट/नए सेशन के बाद भी सीखी हुई मैपिंग बनी रहे
+const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
+let lidPhoneMap = {};
+
+function loadLidPhoneMap() {
+    try {
+        if (fs.existsSync(LID_MAP_FILE)) {
+            lidPhoneMap = JSON.parse(fs.readFileSync(LID_MAP_FILE, 'utf8')) || {};
+            console.log(`📇 LID मैपिंग कैश लोड हुआ (${Object.keys(lidPhoneMap).length} एंट्री)`);
+        }
+    } catch (e) {
+        console.error('❌ LID मैपिंग कैश लोड करने में त्रुटि:', e.message);
+        lidPhoneMap = {};
+    }
+}
+
+function saveLidPhoneMapping(lidJid, phone) {
+    try {
+        if (!lidJid || !phone || lidPhoneMap[lidJid] === phone) return;
+        lidPhoneMap[lidJid] = phone;
+        fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidPhoneMap, null, 2));
+        console.log(`📇 नई LID मैपिंग याद रखी: ${lidJid} → ${phone}`);
+    } catch (e) {
+        console.error('❌ LID मैपिंग सेव करने में त्रुटि:', e.message);
+    }
+}
+
+loadLidPhoneMap();
+
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -47,56 +77,92 @@ function forceClearAuthFolder() {
     }
 }
 
-// 🎯 गार्जियन का 100% असली 10-डिजिट मोबाइल नंबर निकालने वाला बुलेटप्रूफ फ़ंक्शन
-function extractGuardianPhone(jid, msg) {
-    try {
-        let candidates = [];
+// किसी एक JID स्ट्रिंग से शुद्ध 10 अंकों का भारतीय मोबाइल नंबर निकालना।
+// ⚠️ यह सिर्फ असली Phone-Number JID पर काम करता है — @lid (WhatsApp की internal privacy ID) को
+//    हमेशा null करके लौटाता है, कभी भी उसके अंकों से "नंबर जैसा दिखने वाला" कुछ नहीं बनाता।
+//    यही वह जगह थी जहाँ पुराना फॉलबैक गलती करता था और गलत नंबर गूगल शीट को भेज देता था।
+function pnJidToIndianMobile(candidate) {
+    if (!candidate || typeof candidate !== 'string') return null;
+    if (candidate.includes('@lid')) return null;
 
-        // 1. WhatsApp के नए Baileys अपडेट में Phone JID (PN) यहाँ होता है
-        if (msg?.key?.remoteJidAlt) candidates.push(msg.key.remoteJidAlt);
-        if (msg?.key?.participantAlt) candidates.push(msg.key.participantAlt);
+    let digits = candidate.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+
+    // 91 से शुरू होने वाला 12 डिजिट नंबर (उदा: 919792649799)
+    if (digits.length === 12 && digits.startsWith('91')) {
+        const p = digits.substring(2);
+        if (/^[6-9]\d{9}$/.test(p)) return p;
+    }
+
+    // सीधे 10 डिजिट का भारतीय मोबाइल नंबर
+    if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) return digits;
+
+    // छोटी-मोटी गड़बड़ी (एक्स्ट्रा चिन्ह वगैरह) झेलने के लिए — पर सिर्फ छोटी/PN-जैसी लंबाई की स्ट्रिंग पर,
+    // ताकि यह किसी लंबे LID नंबर के अंदर से गलती से 10 अंक न उठा ले
+    if (digits.length > 0 && digits.length <= 13) {
+        const match = digits.match(/[6-9]\d{9}/);
+        if (match && match[0]) return match[0];
+    }
+    return null;
+}
+
+// 🎯 गार्जियन का असली 10-डिजिट मोबाइल नंबर निकालने वाला फ़ंक्शन — अब 3 लेयर में, LID-सेफ
+// ⚠️ ASYNC है क्योंकि ज़रूरत पड़ने पर Baileys के internal LID मैप को भी चेक करता है।
+// सबसे ज़रूरी बदलाव: अगर कहीं से भी पक्का असली नंबर नहीं मिलता, तो यह null लौटाता है —
+// पुराने कोड की तरह अंदाज़े से (LID के अंकों से) कोई गलत नंबर कभी नहीं बनाता।
+async function extractGuardianPhone(jid, msg) {
+    try {
+        const directCandidates = [];
+
+        // 1. WhatsApp के नए Baileys अपडेट में असली Phone JID (PN) यहाँ मिलता है
+        if (msg?.key?.remoteJidAlt) directCandidates.push(msg.key.remoteJidAlt);
+        if (msg?.key?.participantAlt) directCandidates.push(msg.key.participantAlt);
 
         // 2. संदेश के मैसेज पेलोड में
-        if (msg?.key?.participant) candidates.push(msg.key.participant);
-        if (msg?.key?.remoteJid) candidates.push(msg.key.remoteJid);
-        if (jid) candidates.push(jid);
+        if (msg?.key?.participant) directCandidates.push(msg.key.participant);
+        if (msg?.key?.remoteJid) directCandidates.push(msg.key.remoteJid);
+        if (jid) directCandidates.push(jid);
 
         // 3. Extended Context Info
         const ctx = msg?.message?.extendedTextMessage?.contextInfo;
-        if (ctx?.participant) candidates.push(ctx.participant);
+        if (ctx?.participant) directCandidates.push(ctx.participant);
 
-        for (let candidate of candidates) {
-            if (!candidate || typeof candidate !== 'string') continue;
+        // इनमें से जो भी @lid फॉर्मेट में हैं, उन्हें अलग निकाल लो (लेयर 2/3 और सीखने के लिए काम आएँगे)
+        const lidCandidates = [...new Set(directCandidates.filter(c => typeof c === 'string' && c.includes('@lid')))];
 
-            // 🛑 अगर इस JID में '@lid' लगा है, तो यह नकली ID है, इसे छोड़ दो!
-            if (candidate.includes('@lid')) continue;
-
-            // केवल अंक निकालो
-            let digits = candidate.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
-
-            // अगर 12 डिजिट है और 91 से चालू हो रहा है (उदा: 919792649799)
-            if (digits.length === 12 && digits.startsWith('91')) {
-                let p = digits.substring(2);
-                if (/^[6-9]\d{9}$/.test(p)) return p;
-            }
-
-            // अगर सीधे 10 डिजिट का भारतीय नंबर है
-            if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
-                return digits;
-            }
-
-            // अगर स्ट्रिंग बड़ी है, तो उसमें से 10 डिजिट का भारतीय नंबर ढूँढो
-            let match = digits.match(/[6-9]\d{9}/);
-            if (match && match[0]) {
-                return match[0];
+        // 🥇 लेयर 1 — सीधे candidates में से असली PN ढूँढो (सबसे भरोसेमंद, ज़्यादातर मामलों में यहीं मिल जाएगा)
+        for (const candidate of directCandidates) {
+            const phone = pnJidToIndianMobile(candidate);
+            if (phone) {
+                // अगर असली remoteJid/participant @lid फॉर्मेट में था, तो यह सीखा हुआ जोड़ा याद रख लो
+                lidCandidates.forEach(lidJid => saveLidPhoneMapping(lidJid, phone));
+                return phone;
             }
         }
 
-        // फॉलबैक
-        let cleanJid = (jid || '').split('@')[0].replace(/[^0-9]/g, '');
-        return cleanJid.slice(-10);
+        // 🥈 लेयर 2 — Baileys के अपने internal LID↔PN स्टोर में देखो (उपलब्ध हो तभी, इसलिए सब कुछ ऑप्शनल-चेन्ड है)
+        for (const lidJid of lidCandidates) {
+            try {
+                const resolved = await sock?.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
+                const phone = pnJidToIndianMobile(resolved);
+                if (phone) {
+                    saveLidPhoneMapping(lidJid, phone);
+                    return phone;
+                }
+            } catch (e) { /* सिर्फ best-effort — चुपचाप आगे बढ़ो */ }
+        }
+
+        // 🥉 लेयर 3 — अपने खुद के सेव किए हुए कैश में देखो (इसी गार्जियन के LID से पहले कभी नंबर मैच हुआ हो तो)
+        for (const lidJid of lidCandidates) {
+            if (lidPhoneMap[lidJid]) return lidPhoneMap[lidJid];
+        }
+
+        // ❌ कहीं से भी पक्का असली नंबर नहीं मिला। पुराने कोड जैसा अंदाज़ा लगाकर गलत नंबर मत बनाओ —
+        // साफ़-साफ़ null लौटाओ ताकि आगे का लॉजिक गलत नंबर गूगल शीट को भेजने के बजाय ईमानदारी से संभाले।
+        console.log(`⚠️ [LID-UNRESOLVED] गार्जियन का असली मोबाइल नंबर नहीं निकल पाया। Raw JID: ${jid}`);
+        return null;
     } catch (e) {
-        return (jid || '').split('@')[0].replace(/[^0-9]/g, '').slice(-10);
+        console.error('❌ extractGuardianPhone में त्रुटि:', e.message);
+        return null;
     }
 }
 
