@@ -8,6 +8,11 @@ const PDFDocument = require('pdfkit');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const gTTS = require('gtts');
+const ffmpegPath = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
@@ -463,6 +468,59 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
+// 🎙️ हिंदी में असली (महिला आवाज़) वॉइस नोट जनरेट करना — Google TTS (free) + ffmpeg से ogg/opus में कन्वर्ट
+async function generateHindiVoiceNote(text) {
+    const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
+    const oggPath = path.join(os.tmpdir(), `voice_${stamp}.ogg`);
+
+    return new Promise((resolve, reject) => {
+        const speech = new gTTS(text, 'hi'); // 'hi' = हिंदी, डिफ़ॉल्ट रूप से महिला आवाज़
+        speech.save(mp3Path, (err) => {
+            if (err) return reject(err);
+
+            ffmpeg(mp3Path)
+                .audioCodec('libopus')
+                .audioBitrate('32k')
+                .audioChannels(1)
+                .format('ogg')
+                .on('end', () => {
+                    try {
+                        const buffer = fs.readFileSync(oggPath);
+                        try { fs.unlinkSync(mp3Path); } catch (e) {}
+                        try { fs.unlinkSync(oggPath); } catch (e) {}
+                        resolve(buffer);
+                    } catch (readErr) {
+                        reject(readErr);
+                    }
+                })
+                .on('error', (ffErr) => {
+                    try { fs.unlinkSync(mp3Path); } catch (e) {}
+                    reject(ffErr);
+                })
+                .save(oggPath);
+        });
+    });
+}
+
+// 🔊 फीस जमा होने पर गार्जियन को हिंदी वॉइस नोट भेजना
+async function sendFeeVoiceNote(jid, data) {
+    try {
+        const spokenText = `नमस्ते! ${data.name || 'छात्र'} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। धन्यवाद। जे आर डी पब्लिक स्कूल, मरुई, वाराणसी।`;
+        const audioBuffer = await generateHindiVoiceNote(spokenText);
+
+        if (sock && isBotReady) {
+            await sock.sendMessage(jid, {
+                audio: audioBuffer,
+                mimetype: 'audio/ogg; codecs=opus',
+                ptt: true // true = वॉइस नोट जैसा दिखेगा (waveform के साथ), न कि साधारण ऑडियो फ़ाइल
+            });
+        }
+    } catch (err) {
+        console.error('❌ वॉइस नोट भेजने में त्रुटि:', err.message);
+    }
+}
+
 // 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE WITH DUAL RECEIPT (TEXT + PDF)
 let messageQueue = [];
 let isProcessingQueue = false;
@@ -493,6 +551,10 @@ async function processQueue() {
                 // 2. ऑटोमैटिक PDF रसीद जनरेट करके भेजना
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
+
+                // 3. हिंदी में वॉइस नोट भेजना (फीस कन्फर्मेशन बोलकर सुनाना)
+                await new Promise(res => setTimeout(res, 1500));
+                await sendFeeVoiceNote(jid, item);
 
                 messageQueue.shift();
             } else {
