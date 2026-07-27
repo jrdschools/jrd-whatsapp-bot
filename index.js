@@ -242,11 +242,37 @@ async function startBot() {
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
             // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
-const senderPhone = await extractGuardianPhone(jid, msg);
+            const senderPhone = await extractGuardianPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
             console.log(`📱 मैसेज आया | निष्पादित गार्जियन नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+
+            // 🆕 अगर WhatsApp की नई Privacy (LID) सिस्टम की वजह से नंबर बिल्कुल नहीं मिला,
+            // तो गार्जियन से एक बार उसका पंजीकृत मोबाइल नंबर माँग लो और उसे स्थायी रूप से याद रख लो।
+            if (!senderPhone) {
+                const possiblePhone = rawText.replace(/[^0-9]/g, '');
+
+                if (possiblePhone.length === 10 && /^[6-9]\d{9}$/.test(possiblePhone)) {
+                    try {
+                        const verifyUrl = `${GOOGLE_SCRIPT_URL}?action=get_student&phone=${possiblePhone}&query=CHECK_USER`;
+                        const verifyRes = await axios.get(verifyUrl, { timeout: 12000 });
+
+                        if (verifyRes.data?.status !== 'unregistered_number') {
+                            saveLidPhoneMapping(jid, possiblePhone);
+                            await sendReply(jid, `✅ *आपका नंबर सफलतापूर्वक जुड़ गया है!*\n\nकृपया दोबारा *Hi* लिखें और मेन्यू देखें।`);
+                        } else {
+                            await sendReply(jid, `❌ यह नंबर (*${possiblePhone}*) विद्यालय डेटाबेस में पंजीकृत नहीं है।\n\nकृपया अपना सही पंजीकृत नंबर दोबारा भेजें।`);
+                        }
+                    } catch (e) {
+                        await sendReply(jid, `⚠️ सत्यापन में त्रुटि हुई। कृपया कुछ देर बाद पुनः प्रयास करें।`);
+                    }
+                    return;
+                }
+
+                await sendReply(jid, `👋 *नमस्ते!*\nWhatsApp की नई प्राइवेसी सेटिंग के कारण आपका नंबर स्वतः नहीं पहचाना जा सका।\n\n📱 कृपया अपना वही *10 अंकों का मोबाइल नंबर* भेजें जो विद्यालय में पंजीकृत है (उदाहरण: 9792649799)।`);
+                return;
+            }
 
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
@@ -560,12 +586,29 @@ app.get('/reset-qr', (req, res) => {
     setTimeout(() => startBot(), 1000);
     res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
+
+// 🧹 पुरानी/ग़लत LID→Phone कैश एंट्रीज़ को हटाने के लिए (ज़रूरत पड़ने पर एक बार उपयोग करें, फिर हटा दें)
+app.get('/clear-lid-cache', (req, res) => {
+    try {
+        if (fs.existsSync(LID_MAP_FILE)) {
+            fs.unlinkSync(LID_MAP_FILE);
+            lidPhoneMap = {};
+            return res.send('✅ LID cache cleared. Purani galat mappings hat gayi.');
+        }
+        res.send('ℹ️ Cache file already khali/absent hai.');
+    } catch (e) {
+        res.status(500).send('❌ Error: ' + e.message);
+    }
+});
+
 app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
+
 // ⚡ 4 मिनट में रेलवे सर्वर को अलाइव रखने वाला सेल्फ-पिंग
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
