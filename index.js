@@ -190,11 +190,14 @@ async function startBot() {
             msgRetryCounterCache,
             retryRequestDelayMs: 1000,
             maxMsgRetryCount: 5,
-            getMessage: async (key) => {
-                if (messageCache.has(key.id)) return messageCache.get(key.id);
-                return { conversation: 'JRD Public School' };
-            }
-        });
+getMessage: async (key) => {
+    if (messageCache.has(key.id)) {
+        const cached = messageCache.get(key.id);
+        return cached.message || cached;
+    }
+    // undefined लौटाने से Baileys WhatsApp से उस मैसेज की री-ट्राय रिक्वेस्ट (Retry Request) माँगता है
+    return undefined;
+}
 
         sock.ev.on('creds.update', saveCreds);
 
@@ -616,3 +619,31 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
+// 🧹 auth_info_baileys में से पुरानी प्री-कीज़ (Pre-keys) साफ़ करने वाला फंक्शन
+function cleanUnusedAuthKeys() {
+    try {
+        if (!fs.existsSync(AUTH_FOLDER)) return;
+        const files = fs.readdirSync(AUTH_FOLDER);
+        let deletedCount = 0;
+
+        files.forEach(file => {
+            // creds.json और app-state फ़ाइलों को गलती से भी डिलीट न करें
+            if (file === 'creds.json' || file.startsWith('app-state')) return;
+
+            // पुरानी pre-keys और sender-keys जो मेमोरी खाती हैं, उन्हें डिलीट करें
+            if (file.startsWith('pre-key-') || file.startsWith('sender-key-')) {
+                const filePath = path.join(AUTH_FOLDER, file);
+                fs.unlinkSync(filePath);
+                deletedCount++;
+            }
+        });
+        if (deletedCount > 0) {
+            console.log(`🧹 [Auth Cleanup] ${deletedCount} फालतू प्री-की फ़ाइलें डिलीट की गईं।`);
+        }
+    } catch (e) {
+        console.error('❌ Auth key cleanup में त्रुटि:', e.message);
+    }
+}
+
+// हर 6 घंटे में पुरानी keys साफ़ करें ताकि Railway RAM भरके क्रैश न हो
+setInterval(cleanUnusedAuthKeys, 6 * 60 * 60 * 1000);
