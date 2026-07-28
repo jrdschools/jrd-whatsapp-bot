@@ -1,5 +1,5 @@
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidBroadcast } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcodeTerminal = require('qrcode-terminal');
 const express = require('express');
@@ -195,17 +195,19 @@ async function startBot() {
             logger: pino({ level: 'silent' }),
             printQRInTerminal: false,
             syncFullHistory: false,
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: false, // 👈 ऑनलाइन सिंक जनरेट होने वाले E2E टकराव रोकने के लिए
             browser: Browsers.ubuntu('Chrome'),
             msgRetryCounterCache,
-            retryRequestDelayMs: 1000,
-            maxMsgRetryCount: 5,
+            retryRequestDelayMs: 2000,
+            maxMsgRetryCount: 10,
+            shouldIgnoreJid: jid => isJidBroadcast(jid),
             getMessage: async (key) => {
                 if (messageCache.has(key.id)) {
                     const cached = messageCache.get(key.id);
                     return cached.message || cached;
                 }
-                return undefined;
+                // 👈 की मिस होने पर खाली कॉन्वर्सेशन ऑब्जेक्ट रिटर्न करने से व्हाट्सएप री-सिंक प्रोसेस शुरू करता है
+                return { conversation: 'JRD Public School' };
             }
         });
 
