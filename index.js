@@ -8,11 +8,11 @@ const PDFDocument = require('pdfkit');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की स्थायी मैपिंग
-// जानबूझकर auth_info_baileys से अलग रखी है ताकि QR रीसेट/नए सेशन के बाद भी सीखी हुई मैपिंग बनी रहे
+// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की मैपिंग
 const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
 let lidPhoneMap = {};
 
@@ -54,12 +54,21 @@ app.use((req, res, next) => {
 const messageCache = new Map();
 const msgRetryCounterCache = new Map();
 
+function cacheMessage(id, messageData) {
+    if (!id) return;
+    if (messageCache.size > 2000) {
+        const firstKey = messageCache.keys().next().value;
+        messageCache.delete(firstKey);
+    }
+    messageCache.set(id, messageData);
+}
+
 let sock = null;
 let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🧹 ऑथ फ़ोल्डर क्लीनर
+// 🧹 ऑथ फ़ोल्डर क्लीनर (Force Reset)
 function forceClearAuthFolder() {
     try {
         if (sock) {
@@ -76,27 +85,43 @@ function forceClearAuthFolder() {
     }
 }
 
-// किसी एक JID स्ट्रिंग से शुद्ध 10 अंकों का भारतीय मोबाइल नंबर निकालना।
-// ⚠️ यह सिर्फ असली Phone-Number JID पर काम करता है — @lid (WhatsApp की internal privacy ID) को
-//    हमेशा null करके लौटाता है, कभी भी उसके अंकों से "नंबर जैसा दिखने वाला" कुछ नहीं बनाता।
-//    यही वह जगह थी जहाँ पुराना फॉलबैक गलती करता था और गलत नंबर गूगल शीट को भेज देता था।
+// 🧹 ऑथ फ़ोल्डर की पुरानी अन-यूज्ड प्री-कीज़ साफ़ करने वाला रूटीन (Memory Leak Protection)
+function cleanUnusedAuthKeys() {
+    try {
+        if (!fs.existsSync(AUTH_FOLDER)) return;
+        const files = fs.readdirSync(AUTH_FOLDER);
+        let deletedCount = 0;
+
+        files.forEach(file => {
+            if (file === 'creds.json' || file.startsWith('app-state')) return;
+            if (file.startsWith('pre-key-') || file.startsWith('sender-key-')) {
+                fs.unlinkSync(path.join(AUTH_FOLDER, file));
+                deletedCount++;
+            }
+        });
+        if (deletedCount > 0) {
+            console.log(`🧹 [Auth Cleanup] ${deletedCount} पुरानी प्री-की फ़ाइलें डिलीट की गईं।`);
+        }
+    } catch (e) {
+        console.error('❌ Auth key cleanup में त्रुटि:', e.message);
+    }
+}
+
+setInterval(cleanUnusedAuthKeys, 6 * 60 * 60 * 1000);
+
 function pnJidToIndianMobile(candidate) {
     if (!candidate || typeof candidate !== 'string') return null;
     if (candidate.includes('@lid')) return null;
 
     let digits = candidate.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
 
-    // 91 से शुरू होने वाला 12 डिजिट नंबर (उदा: 919792649799)
     if (digits.length === 12 && digits.startsWith('91')) {
         const p = digits.substring(2);
         if (/^[6-9]\d{9}$/.test(p)) return p;
     }
 
-    // सीधे 10 डिजिट का भारतीय मोबाइल नंबर
     if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) return digits;
 
-    // छोटी-मोटी गड़बड़ी (एक्स्ट्रा चिन्ह वगैरह) झेलने के लिए — पर सिर्फ छोटी/PN-जैसी लंबाई की स्ट्रिंग पर,
-    // ताकि यह किसी लंबे LID नंबर के अंदर से गलती से 10 अंक न उठा ले
     if (digits.length > 0 && digits.length <= 13) {
         const match = digits.match(/[6-9]\d{9}/);
         if (match && match[0]) return match[0];
@@ -104,41 +129,29 @@ function pnJidToIndianMobile(candidate) {
     return null;
 }
 
-// 🎯 गार्जियन का असली 10-डिजिट मोबाइल नंबर निकालने वाला फ़ंक्शन — अब 3 लेयर में, LID-सेफ
-// ⚠️ ASYNC है क्योंकि ज़रूरत पड़ने पर Baileys के internal LID मैप को भी चेक करता है।
-// सबसे ज़रूरी बदलाव: अगर कहीं से भी पक्का असली नंबर नहीं मिलता, तो यह null लौटाता है —
-// पुराने कोड की तरह अंदाज़े से (LID के अंकों से) कोई गलत नंबर कभी नहीं बनाता।
 async function extractGuardianPhone(jid, msg) {
     try {
         const directCandidates = [];
 
-        // 1. WhatsApp के नए Baileys अपडेट में असली Phone JID (PN) यहाँ मिलता है
         if (msg?.key?.remoteJidAlt) directCandidates.push(msg.key.remoteJidAlt);
         if (msg?.key?.participantAlt) directCandidates.push(msg.key.participantAlt);
-
-        // 2. संदेश के मैसेज पेलोड में
         if (msg?.key?.participant) directCandidates.push(msg.key.participant);
         if (msg?.key?.remoteJid) directCandidates.push(msg.key.remoteJid);
         if (jid) directCandidates.push(jid);
 
-        // 3. Extended Context Info
         const ctx = msg?.message?.extendedTextMessage?.contextInfo;
         if (ctx?.participant) directCandidates.push(ctx.participant);
 
-        // इनमें से जो भी @lid फॉर्मेट में हैं, उन्हें अलग निकाल लो (लेयर 2/3 और सीखने के लिए काम आएँगे)
         const lidCandidates = [...new Set(directCandidates.filter(c => typeof c === 'string' && c.includes('@lid')))];
 
-        // 🥇 लेयर 1 — सीधे candidates में से असली PN ढूँढो (सबसे भरोसेमंद, ज़्यादातर मामलों में यहीं मिल जाएगा)
         for (const candidate of directCandidates) {
             const phone = pnJidToIndianMobile(candidate);
             if (phone) {
-                // अगर असली remoteJid/participant @lid फॉर्मेट में था, तो यह सीखा हुआ जोड़ा याद रख लो
                 lidCandidates.forEach(lidJid => saveLidPhoneMapping(lidJid, phone));
                 return phone;
             }
         }
 
-        // 🥈 लेयर 2 — Baileys के अपने internal LID↔PN स्टोर में देखो (उपलब्ध हो तभी, इसलिए सब कुछ ऑप्शनल-चेन्ड है)
         for (const lidJid of lidCandidates) {
             try {
                 const resolved = await sock?.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
@@ -147,16 +160,13 @@ async function extractGuardianPhone(jid, msg) {
                     saveLidPhoneMapping(lidJid, phone);
                     return phone;
                 }
-            } catch (e) { /* सिर्फ best-effort — चुपचाप आगे बढ़ो */ }
+            } catch (e) {}
         }
 
-        // 🥉 लेयर 3 — अपने खुद के सेव किए हुए कैश में देखो (इसी गार्जियन के LID से पहले कभी नंबर मैच हुआ हो तो)
         for (const lidJid of lidCandidates) {
             if (lidPhoneMap[lidJid]) return lidPhoneMap[lidJid];
         }
 
-        // ❌ कहीं से भी पक्का असली नंबर नहीं मिला। पुराने कोड जैसा अंदाज़ा लगाकर गलत नंबर मत बनाओ —
-        // साफ़-साफ़ null लौटाओ ताकि आगे का लॉजिक गलत नंबर गूगल शीट को भेजने के बजाय ईमानदारी से संभाले।
         console.log(`⚠️ [LID-UNRESOLVED] गार्जियन का असली मोबाइल नंबर नहीं निकल पाया। Raw JID: ${jid}`);
         return null;
     } catch (e) {
@@ -190,14 +200,14 @@ async function startBot() {
             msgRetryCounterCache,
             retryRequestDelayMs: 1000,
             maxMsgRetryCount: 5,
-getMessage: async (key) => {
-    if (messageCache.has(key.id)) {
-        const cached = messageCache.get(key.id);
-        return cached.message || cached;
-    }
-    // undefined लौटाने से Baileys WhatsApp से उस मैसेज की री-ट्राय रिक्वेस्ट (Retry Request) माँगता है
-    return undefined;
-}
+            getMessage: async (key) => {
+                if (messageCache.has(key.id)) {
+                    const cached = messageCache.get(key.id);
+                    return cached.message || cached;
+                }
+                return undefined;
+            }
+        });
 
         sock.ev.on('creds.update', saveCreds);
 
@@ -243,15 +253,12 @@ getMessage: async (key) => {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
             const senderPhone = await extractGuardianPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
             console.log(`📱 मैसेज आया | निष्पादित गार्जियन नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
-            // 🆕 अगर WhatsApp की नई Privacy (LID) सिस्टम की वजह से नंबर बिल्कुल नहीं मिला,
-            // तो गार्जियन से एक बार उसका पंजीकृत मोबाइल नंबर माँग लो और उसे स्थायी रूप से याद रख लो।
             if (!senderPhone) {
                 const possiblePhone = rawText.replace(/[^0-9]/g, '');
 
@@ -279,7 +286,6 @@ getMessage: async (key) => {
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
 
-            // 🎯 मेन्यू ऑप्शन
             if (isOptionNum) {
                 if (lowerText === '1') {
                     await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
@@ -299,7 +305,6 @@ getMessage: async (key) => {
                 }
             }
 
-            // 🎯 नाम, Enrolment, Scholar या Roll नंबर से सर्च
             const searchQuery = rawText.replace(/#/g, '').trim();
 
             try {
@@ -307,7 +312,6 @@ getMessage: async (key) => {
                 const response = await axios.get(apiUrl, { timeout: 12000 });
                 const resData = response.data || {};
 
-                // यदि गार्जियन का नंबर डेटाबेस में पंजीकृत नहीं है
                 if (resData.status === 'unregistered_number') {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
@@ -317,14 +321,12 @@ getMessage: async (key) => {
                     return;
                 }
 
-                // यदि ग्रीटिंग (Hi/Hello/Menu) भेजा है
                 if (isGreeting) {
                     const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No.** लिखकर भेजें (उदा: *#Aditya* या *1024*)\n\n_आपका नंबर पंजीकृत है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
 
-                // यदि छात्र ढूँढा जा रहा है (नाम या Enrolment नो से)
                 if (rawText.includes('#') || searchQuery.length >= 2) {
                     if (resData.status === 'success') {
                         await sendStudentProfileCard(jid, resData.data);
@@ -354,21 +356,19 @@ async function sendReply(jid, text) {
     try {
         if (sock && isBotReady) {
             const sent = await sock.sendMessage(jid, { text });
-            if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: text });
+            if (sent?.key?.id) cacheMessage(sent.key.id, { conversation: text });
         }
     } catch (err) {
         console.error('❌ रिप्लाई भेजने में त्रुटि:', err.message);
     }
 }
 
-// 🎨 VIP स्टूडेंट प्रोफाइल कार्ड फ़ंक्शन
 async function sendStudentProfileCard(jid, s) {
     const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}\n• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
 
-// 📄 BRANDED VIP PDF रसीद जनरेटर फ़ंक्शन
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -387,17 +387,15 @@ async function sendFeePdfReceipt(jid, data) {
                         caption: captionText
                     });
                     if (sent?.key?.id) {
-                        messageCache.set(sent.key.id, { documentMessage: { caption: captionText, fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf` } });
+                        cacheMessage(sent.key.id, { documentMessage: { caption: captionText, fileName: `Fee_Receipt_${data.rid || 'RECEIPT'}.pdf` } });
                     }
                 }
                 resolve();
             });
 
-            // बॉर्डर
             doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
             doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
 
-            // हेडर
             doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
             doc.fillColor('#FFFFFF').fontSize(16).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
             doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) | Contact: Office Administration', 20, 48, { align: 'center' });
@@ -465,7 +463,6 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE WITH DUAL RECEIPT (TEXT + PDF)
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -488,11 +485,9 @@ async function processQueue() {
                     textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
                 }
 
-                // 1. सुंदर टेक्स्ट मैसेज भेजना
                 const sent = await sock.sendMessage(jid, { text: textToSend });
-                if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
+                if (sent?.key?.id) cacheMessage(sent.key.id, { conversation: textToSend });
 
-                // 2. ऑटोमैटिक PDF रसीद जनरेट करके भेजना
                 await new Promise(res => setTimeout(res, 1500));
                 await sendFeePdfReceipt(jid, item);
 
@@ -513,7 +508,6 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 📩 ऐप्स स्क्रिप्ट से आने वाले फीस / बल्क मैसेज कतार में जोड़ना
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -539,7 +533,6 @@ app.post('/enqueue-message', (req, res) => {
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
 });
 
-// 📩 डायरेक्ट मैसेज सेंड API
 app.post('/send-whatsapp', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
@@ -553,14 +546,13 @@ app.post('/send-whatsapp', async (req, res) => {
         let formattedNumber = targetPhone.toString().replace(/[^0-9]/g, '');
         if (formattedNumber.length === 10) formattedNumber = '91' + formattedNumber;
         const sent = await sock.sendMessage(formattedNumber + '@s.whatsapp.net', { text: message });
-        if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: message });
+        if (sent?.key?.id) cacheMessage(sent.key.id, { conversation: message });
         return res.status(200).json({ status: 'success' });
     } catch (error) {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
 
-// 🌐 QR कोड और वेब रूट्स
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP बोट व्हाट्सएप से कनेक्टेड है!</h2>');
@@ -589,7 +581,6 @@ app.get('/reset-qr', (req, res) => {
     res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
 
-// 🧹 पुरानी/ग़लत LID→Phone कैश एंट्रीज़ को हटाने के लिए (ज़रूरत पड़ने पर एक बार उपयोग करें, फिर हटा दें)
 app.get('/clear-lid-cache', (req, res) => {
     try {
         if (fs.existsSync(LID_MAP_FILE)) {
@@ -611,7 +602,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
 
-// ⚡ 4 मिनट में रेलवे सर्वर को अलाइव रखने वाला सेल्फ-पिंग
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful');
@@ -619,31 +609,3 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-// 🧹 auth_info_baileys में से पुरानी प्री-कीज़ (Pre-keys) साफ़ करने वाला फंक्शन
-function cleanUnusedAuthKeys() {
-    try {
-        if (!fs.existsSync(AUTH_FOLDER)) return;
-        const files = fs.readdirSync(AUTH_FOLDER);
-        let deletedCount = 0;
-
-        files.forEach(file => {
-            // creds.json और app-state फ़ाइलों को गलती से भी डिलीट न करें
-            if (file === 'creds.json' || file.startsWith('app-state')) return;
-
-            // पुरानी pre-keys और sender-keys जो मेमोरी खाती हैं, उन्हें डिलीट करें
-            if (file.startsWith('pre-key-') || file.startsWith('sender-key-')) {
-                const filePath = path.join(AUTH_FOLDER, file);
-                fs.unlinkSync(filePath);
-                deletedCount++;
-            }
-        });
-        if (deletedCount > 0) {
-            console.log(`🧹 [Auth Cleanup] ${deletedCount} फालतू प्री-की फ़ाइलें डिलीट की गईं।`);
-        }
-    } catch (e) {
-        console.error('❌ Auth key cleanup में त्रुटि:', e.message);
-    }
-}
-
-// हर 6 घंटे में पुरानी keys साफ़ करें ताकि Railway RAM भरके क्रैश न हो
-setInterval(cleanUnusedAuthKeys, 6 * 60 * 60 * 1000);
