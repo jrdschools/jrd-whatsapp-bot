@@ -693,24 +693,29 @@ app.post('/send-attendance', async (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Missing phone number' });
     }
 
-    // 🎯 1. टाइम क्लीनअप (1899/Epoch झंझट खत्म)
+// 🎯 1. टाइम क्लीनअप (Asia/Kolkata Timezone + IST Force Fix)
     let rawTime = String(body.time || body.in_time || body.out_time || '').trim();
     let cleanTime = '';
 
-    if (rawTime.includes('1899') || rawTime.includes('GMT') || rawTime.includes('T')) {
-        try {
-            let d = new Date(rawTime);
-            cleanTime = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-        } catch(e) {
-            cleanTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-        }
-    } else if (rawTime === '' || rawTime === '--') {
-        cleanTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    // अगर समय में 1899, GMT, UTC है या खाली है, तो 1899 को parse मत करो — सीधे वर्तमान भारतीय समय लो
+    if (rawTime.includes('1899') || rawTime.includes('GMT') || rawTime.includes('T') || rawTime === '' || rawTime === '--') {
+        cleanTime = new Date().toLocaleTimeString('en-US', {
+            timeZone: 'Asia/Kolkata',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
     } else {
-        cleanTime = rawTime;
+        cleanTime = rawTime; // अगर पहले से साफ़ समय '01:40 PM' भेजा गया है
     }
 
-    let todayStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    // 🎯 2. दिनांक भी शुद्ध भारतीय समय (Asia/Kolkata) के अनुसार
+    let todayStr = new Date().toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
 
     // 🎯 2. आज की तारीख (1 से 31) निकालें
     const dayOfMonth = new Date().getDate(); // 1, 2, 3 ... 31
