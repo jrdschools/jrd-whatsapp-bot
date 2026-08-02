@@ -679,15 +679,19 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-// 👨‍🎓 👩‍🏫 गूगल शीट से आने वाली अटेंडेंस (स्टूडेंट और टीचर दोनों के लिए) का VIP राउट
+// 👨‍🎓 👩‍🏫 गूगल शीट से आने वाली अटेंडेंस (स्टूडेंट और टीचर IN/OUT दोनों के लिए) का VIP राउट
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
     const name = body.name || 'सदस्य';
-    const status = body.status || 'Absent';
+    const status = body.status || 'P';
     const className = body.class || '';
     const type = body.type || 'STUDENT_ATTENDANCE';
-    const dateStr = new Date().toLocaleDateString('en-IN');
+    
+    // 🎯 टीचर अटेंडेंस के लिए नए डायनेमिक फ़ील्ड्स
+    const attType = (body.attendance_type || body.att_type || 'IN').toString().toUpperCase().trim(); // 'IN' या 'OUT'
+    const eventTime = body.time || body.in_time || body.out_time || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const dateStr = body.date || new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
     if (!targetPhone) {
         return res.status(400).json({ status: 'error', message: 'Missing phone number' });
@@ -706,11 +710,17 @@ app.post('/send-attendance', async (req, res) => {
         let messageText = "";
 
         if (type === 'TEACHER_ATTENDANCE') {
-            // टीचर के लिए व्यक्तिगत उपस्थिति संदेश
-            messageText = `🏫 *J.R.D. PUBLIC SCHOOL - ERP SYSTEM*\n📅 *दिनांक:* ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n📋 *शिक्षक उपस्थिति सूचना (TEACHER ATTENDANCE)*\n\nआदरणीय शिक्षक *${name}* जी,\nआज विद्यालय में आपकी उपस्थिति दर्ज की गई है: **${status.toUpperCase()}**\n\nधन्यवाद! - JRD Management`;
+            // 🎯 टीचर प्रस्थान (OUT-TIME) दर्ज होने पर
+            if (attType === 'OUT') {
+                messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n📅 *दिनांक:* ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n🚩 *शिक्षक प्रस्थान सूचना (OUT-TIME)*\n\nआदरणीय शिक्षक *${name}* जी,\n\nआज विद्यालय से आपका प्रस्थान समय (OUT) दर्ज कर लिया गया है:\n🕒 *समय:* **${eventTime}**\n\n✅ *आज का कार्य दिवस सफलतापूर्वक संपन्न हुआ। धन्यवाद!*\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`;
+            } 
+            // 🎯 टीचर आगमन (IN-TIME) दर्ज होने पर
+            else {
+                messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n📅 *दिनांक:* ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n📋 *शिक्षक आगमन सूचना (IN-TIME)*\n\nआदरणीय शिक्षक *${name}* जी,\n\nआज विद्यालय में आपका आगमन समय (IN) दर्ज कर लिया गया है:\n🕒 *समय:* **${eventTime}**\n\n✅ *आपकी आज की उपस्थिति (PRESENT) दर्ज हो गई है।*\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`;
+            }
         } else {
-            // स्टूडेंट के गार्जियन के लिए संदेश
-            const isAbsent = status.toLowerCase() === 'absent' || status === 'a' || status === 'अनुपस्थित';
+            // 🎯 स्टूडेंट के गार्जियन के लिए मैसेज
+            const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
             if (isAbsent) {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n📅 *दिनांक:* ${dateStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *दैनिक उपस्थिति सूचना (ATTENDANCE ALERT)*\n\nप्रिय अभिभावक,\nआपको सूचित किया जाता है कि आपके बच्चे *${name}* (कक्षा: ${className}) आज विद्यालय में **अनुपस्थित (ABSENT)** रहे हैं।\n\n_यदि बच्चा आपकी जानकारी में स्कूल गया है, तो कृपया कार्यालय से संपर्क करें।_\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`;
             } else {
@@ -718,8 +728,10 @@ app.post('/send-attendance', async (req, res) => {
             }
         }
 
-        await sock.sendMessage(jid, { text: messageText });
-        console.log(`✅ [${type}] अटेंडेंस मैसेज भेजा गया -> ${name} (${formattedNumber}) : Status -> ${status}`);
+        const sent = await sock.sendMessage(jid, { text: messageText });
+        if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
+
+        console.log(`✅ [${type} - ${attType}] अटेंडेंस मैसेज भेजा गया -> ${name} (${formattedNumber}) : Time -> ${eventTime}`);
 
         return res.status(200).json({ status: 'success', message: 'Attendance message sent successfully' });
     } catch (error) {
