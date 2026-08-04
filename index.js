@@ -34,7 +34,7 @@ function safePdfText(str, fallback = 'N/A') {
     return clean.length > 0 ? clean : fallback;
 }
 
-// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की मैपिंग
+// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की मैपिंग 
 const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
 let lidPhoneMap = {};
 
