@@ -34,14 +34,14 @@ function safePdfText(str, fallback = 'N/A') {
     return clean.length > 0 ? clean : fallback;
 }
 
-// 📊 On-Demand Dynamic Fee Calculator (Student Type के अनुसार)
+// 📊 On-Demand Dynamic Fee Calculator (Till Month Logic)
 function calculateDynamicDue(student) {
     const monthlyFee = parseFloat(student.monthly_fee || student.tuition_fee || 0);
     const studentType = String(student.type || student.student_type || 'REGULAR').toUpperCase();
     const oldDue = parseFloat(student.old_due || 0);
     const totalPaid = parseFloat(student.total_paid || student.paid || 0);
 
-    // अप्रैल (Month 4) से चालू माह तक के महीनों की संख्या
+    // अप्रैल (महीना 4) से चालू महीने तक की गणना
     const currentMonth = new Date().getMonth() + 1;
     let elapsedMonths = 0;
     if (currentMonth >= 4) {
@@ -50,7 +50,7 @@ function calculateDynamicDue(student) {
         elapsedMonths = currentMonth + 9;
     }
 
-    // RTE छात्रों के लिए ट्यूशन फ़ीस शून्य
+    // RTE श्रेणी हेतु ट्यूशन फ़ीस शून्य
     let actualMonthlyFee = (studentType === 'RTE') ? 0 : monthlyFee;
     let expectedTillMonth = actualMonthlyFee * elapsedMonths;
     let currentDue = Math.max(0, expectedTillMonth - totalPaid);
