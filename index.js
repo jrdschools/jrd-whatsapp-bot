@@ -9,16 +9,26 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const gTTS = require('gtts');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('edge-tts'); // 👩‍🏫 Sweet Indian Voice (Swara)
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// 🗄️ Database Connection Import
+let updateAttendanceSmsStatus, testDbConnection;
+try {
+    const db = require('./db');
+    updateAttendanceSmsStatus = db.updateAttendanceSmsStatus;
+    testDbConnection = db.testDbConnection;
+    if (testDbConnection) testDbConnection();
+} catch (e) {
+    console.log('⚠️ db.js फ़ाइल उपलब्ध नहीं है या स्किप की गई है।');
+}
+
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की स्थायी मैपिंग
-// जानबूझकर auth_info_baileys से अलग रखी है ताकि QR रीसेट/नए सेशन के बाद भी सीखी हुई मैपिंग बनी रहे
+// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की मैपिंग
 const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
 let lidPhoneMap = {};
 
@@ -82,27 +92,19 @@ function forceClearAuthFolder() {
     }
 }
 
-// किसी एक JID स्ट्रिंग से शुद्ध 10 अंकों का भारतीय मोबाइल नंबर निकालना।
-// ⚠️ यह सिर्फ असली Phone-Number JID पर काम करता है — @lid (WhatsApp की internal privacy ID) को
-//    हमेशा null करके लौटाता है, कभी भी उसके अंकों से "नंबर जैसा दिखने वाला" कुछ नहीं बनाता।
-//    यही वह जगह थी जहाँ पुराना फॉलबैक गलती करता था और गलत नंबर गूगल शीट को भेज देता था।
 function pnJidToIndianMobile(candidate) {
     if (!candidate || typeof candidate !== 'string') return null;
     if (candidate.includes('@lid')) return null;
 
     let digits = candidate.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
 
-    // 91 से शुरू होने वाला 12 डिजिट नंबर (उदा: 919792649799)
     if (digits.length === 12 && digits.startsWith('91')) {
         const p = digits.substring(2);
         if (/^[6-9]\d{9}$/.test(p)) return p;
     }
 
-    // सीधे 10 डिजिट का भारतीय मोबाइल नंबर
     if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) return digits;
 
-    // छोटी-मोटी गड़बड़ी (एक्स्ट्रा चिन्ह वगैरह) झेलने के लिए — पर सिर्फ छोटी/PN-जैसी लंबाई की स्ट्रिंग पर,
-    // ताकि यह किसी लंबे LID नंबर के अंदर से गलती से 10 अंक न उठा ले
     if (digits.length > 0 && digits.length <= 13) {
         const match = digits.match(/[6-9]\d{9}/);
         if (match && match[0]) return match[0];
@@ -110,41 +112,29 @@ function pnJidToIndianMobile(candidate) {
     return null;
 }
 
-// 🎯 गार्जियन का असली 10-डिजिट मोबाइल नंबर निकालने वाला फ़ंक्शन — अब 3 लेयर में, LID-सेफ
-// ⚠️ ASYNC है क्योंकि ज़रूरत पड़ने पर Baileys के internal LID मैप को भी चेक करता है।
-// सबसे ज़रूरी बदलाव: अगर कहीं से भी पक्का असली नंबर नहीं मिलता, तो यह null लौटाता है —
-// पुराने कोड की तरह अंदाज़े से (LID के अंकों से) कोई गलत नंबर कभी नहीं बनाता।
 async function extractGuardianPhone(jid, msg) {
     try {
         const directCandidates = [];
 
-        // 1. WhatsApp के नए Baileys अपडेट में असली Phone JID (PN) यहाँ मिलता है
         if (msg?.key?.remoteJidAlt) directCandidates.push(msg.key.remoteJidAlt);
         if (msg?.key?.participantAlt) directCandidates.push(msg.key.participantAlt);
-
-        // 2. संदेश के मैसेज पेलोड में
         if (msg?.key?.participant) directCandidates.push(msg.key.participant);
         if (msg?.key?.remoteJid) directCandidates.push(msg.key.remoteJid);
         if (jid) directCandidates.push(jid);
 
-        // 3. Extended Context Info
         const ctx = msg?.message?.extendedTextMessage?.contextInfo;
         if (ctx?.participant) directCandidates.push(ctx.participant);
 
-        // इनमें से जो भी @lid फॉर्मेट में हैं, उन्हें अलग निकाल लो (लेयर 2/3 और सीखने के लिए काम आएँगे)
         const lidCandidates = [...new Set(directCandidates.filter(c => typeof c === 'string' && c.includes('@lid')))];
 
-        // 🥇 लेयर 1 — सीधे candidates में से असली PN ढूँढो (सबसे भरोसेमंद, ज़्यादातर मामलों में यहीं मिल जाएगा)
         for (const candidate of directCandidates) {
             const phone = pnJidToIndianMobile(candidate);
             if (phone) {
-                // अगर असली remoteJid/participant @lid फॉर्मेट में था, तो यह सीखा हुआ जोड़ा याद रख लो
                 lidCandidates.forEach(lidJid => saveLidPhoneMapping(lidJid, phone));
                 return phone;
             }
         }
 
-        // 🥈 लेयर 2 — Baileys के अपने internal LID↔PN स्टोर में देखो (उपलब्ध हो तभी, इसलिए सब कुछ ऑप्शनल-चेन्ड है)
         for (const lidJid of lidCandidates) {
             try {
                 const resolved = await sock?.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
@@ -153,16 +143,13 @@ async function extractGuardianPhone(jid, msg) {
                     saveLidPhoneMapping(lidJid, phone);
                     return phone;
                 }
-            } catch (e) { /* सिर्फ best-effort — चुपचाप आगे बढ़ो */ }
+            } catch (e) {}
         }
 
-        // 🥉 लेयर 3 — अपने खुद के सेव किए हुए कैश में देखो (इसी गार्जियन के LID से पहले कभी नंबर मैच हुआ हो तो)
         for (const lidJid of lidCandidates) {
             if (lidPhoneMap[lidJid]) return lidPhoneMap[lidJid];
         }
 
-        // ❌ कहीं से भी पक्का असली नंबर नहीं मिला। पुराने कोड जैसा अंदाज़ा लगाकर गलत नंबर मत बनाओ —
-        // साफ़-साफ़ null लौटाओ ताकि आगे का लॉजिक गलत नंबर गूगल शीट को भेजने के बजाय ईमानदारी से संभाले।
         console.log(`⚠️ [LID-UNRESOLVED] गार्जियन का असली मोबाइल नंबर नहीं निकल पाया। Raw JID: ${jid}`);
         return null;
     } catch (e) {
@@ -246,15 +233,12 @@ async function startBot() {
 
             try { await sock.readMessages([msg.key]); } catch (e) {}
 
-            // 🎯 शुद्ध 10-अंकों का गार्जियन मोबाइल नंबर
             const senderPhone = await extractGuardianPhone(jid, msg);
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
             console.log(`📱 मैसेज आया | निष्पादित गार्जियन नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
 
-            // 🆕 अगर WhatsApp की नई Privacy (LID) सिस्टम की वजह से नंबर बिल्कुल नहीं मिला,
-            // तो गार्जियन से एक बार उसका पंजीकृत मोबाइल नंबर माँग लो और उसे स्थायी रूप से याद रख लो।
             if (!senderPhone) {
                 const possiblePhone = rawText.replace(/[^0-9]/g, '');
 
@@ -282,7 +266,6 @@ async function startBot() {
             const isGreeting = ['hi', 'hello', 'नमस्ते', 'menu', 'start', 'good morning', 'suprabhat', 'जय हिंद'].includes(lowerText);
             const isOptionNum = ['1', '2', '3', '4'].includes(lowerText);
 
-            // 🎯 मेन्यू ऑप्शन
             if (isOptionNum) {
                 if (lowerText === '1') {
                     await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
@@ -302,7 +285,6 @@ async function startBot() {
                 }
             }
 
-            // 🎯 नाम, Enrolment, Scholar या Roll नंबर से सर्च
             const searchQuery = rawText.replace(/#/g, '').trim();
 
             try {
@@ -310,7 +292,6 @@ async function startBot() {
                 const response = await axios.get(apiUrl, { timeout: 12000 });
                 const resData = response.data || {};
 
-                // यदि गार्जियन का नंबर डेटाबेस में पंजीकृत नहीं है
                 if (resData.status === 'unregistered_number') {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
                         await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
@@ -320,14 +301,12 @@ async function startBot() {
                     return;
                 }
 
-                // यदि ग्रीटिंग (Hi/Hello/Menu) भेजा है
                 if (isGreeting) {
                     const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No.** लिखकर भेजें (उदा: *#Aditya* या *1024*)\n\n_आपका नंबर पंजीकृत है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
 
-                // यदि छात्र ढूँढा जा रहा है (नाम या Enrolment नो से)
                 if (rawText.includes('#') || searchQuery.length >= 2) {
                     if (resData.status === 'success') {
                         await sendStudentProfileCard(jid, resData.data);
@@ -364,14 +343,13 @@ async function sendReply(jid, text) {
     }
 }
 
-// 🎨 VIP स्टूडेंट प्रोफाइल कार्ड फ़ंक्शन
 async function sendStudentProfileCard(jid, s) {
     const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}\n• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
 
-// 📄 BRANDED VIP PDF रसीद जनरेटर फ़ंक्शन
+// 📄 100% BRANDED VIP OFFICIAL PDF RECEIPT (FOR PAID FEES)
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve, reject) => {
         try {
@@ -382,7 +360,7 @@ async function sendFeePdfReceipt(jid, data) {
             doc.on('end', async () => {
                 const pdfBuffer = Buffer.concat(buffers);
                 if (sock && isBotReady) {
-                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n🧾 छात्र *${data.name || ''}* की आधिकारिक डिजिटल फीस जमा रसीद।`;
+                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n🧾 छात्र *${data.name || data.studentName || ''}* की आधिकारिक डिजिटल फीस जमा रसीद।`;
                     const sent = await sock.sendMessage(jid, {
                         document: pdfBuffer,
                         mimetype: 'application/pdf',
@@ -396,70 +374,74 @@ async function sendFeePdfReceipt(jid, data) {
                 resolve();
             });
 
-            // बॉर्डर
+            // Outer Border
             doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
             doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
 
-            // हेडर
+            // Header Banner
             doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
-            doc.fillColor('#FFFFFF').fontSize(16).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
-            doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) | Contact: Office Administration', 20, 48, { align: 'center' });
+            doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
+            doc.fontSize(8.5).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 20, 48, { align: 'center' });
 
+            // Title Strip
             doc.fillColor('#000000');
             doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
-            doc.fillColor('#1A365D').fontSize(10).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
+            doc.fillColor('#1A365D').fontSize(9.5).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
 
-            const metaTop = 110;
-            doc.rect(20, metaTop, doc.page.width - 40, 75).lineWidth(0.5).stroke('#CBD5E1');
+            // Metadata Box
+            const metaTop = 108;
+            doc.rect(20, metaTop, doc.page.width - 40, 70).lineWidth(0.5).stroke('#CBD5E1');
 
-            doc.fillColor('#334155').fontSize(9).font('Helvetica-Bold');
-            doc.text(`Receipt No : `, 30, metaTop + 10);
-            doc.font('Helvetica').text(`${data.rid || 'N/A'}`, 95, metaTop + 10);
+            doc.fillColor('#334155').fontSize(8.5).font('Helvetica-Bold');
+            doc.text(`Receipt No : `, 28, metaTop + 8);
+            doc.font('Helvetica').text(`${data.rid || 'N/A'}`, 90, metaTop + 8);
 
-            doc.font('Helvetica-Bold').text(`Student Name: `, 30, metaTop + 28);
-            doc.font('Helvetica').text(`${data.name || 'N/A'}`, 105, metaTop + 28);
+            doc.font('Helvetica-Bold').text(`Student Name: `, 28, metaTop + 25);
+            doc.font('Helvetica').text(`${data.name || data.studentName || 'N/A'}`, 95, metaTop + 25);
 
-            doc.font('Helvetica-Bold').text(`Class & Sec  : `, 30, metaTop + 46);
-            doc.font('Helvetica').text(`${data.className || 'N/A'}`, 105, metaTop + 46);
+            doc.font('Helvetica-Bold').text(`Class & Sec  : `, 28, metaTop + 42);
+            doc.font('Helvetica').text(`${data.className || 'N/A'}`, 95, metaTop + 42);
 
             const rightX = doc.page.width / 2 + 10;
-            doc.font('Helvetica-Bold').text(`Session : `, rightX, metaTop + 10);
-            doc.font('Helvetica').text(`${data.session || '2026-27'}`, rightX + 50, metaTop + 10);
+            doc.font('Helvetica-Bold').text(`Session : `, rightX, metaTop + 8);
+            doc.font('Helvetica').text(`${data.session || '2026-27'}`, rightX + 45, metaTop + 8);
 
-            doc.font('Helvetica-Bold').text(`Status  : `, rightX, metaTop + 28);
-            doc.fillColor('#15803D').font('Helvetica-Bold').text(`PAID ✅`, rightX + 50, metaTop + 28);
+            doc.font('Helvetica-Bold').text(`Status  : `, rightX, metaTop + 25);
+            doc.fillColor('#15803D').font('Helvetica-Bold').text(`PAID ✅`, rightX + 45, metaTop + 25);
 
-            doc.fillColor('#334155').font('Helvetica-Bold').text(`Date    : `, rightX, metaTop + 46);
+            doc.fillColor('#334155').font('Helvetica-Bold').text(`Date    : `, rightX, metaTop + 42);
             const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-            doc.font('Helvetica').text(`${todayDate}`, rightX + 50, metaTop + 46);
+            doc.font('Helvetica').text(`${todayDate}`, rightX + 45, metaTop + 42);
 
-            const tableTop = 195;
-            doc.rect(20, tableTop, doc.page.width - 40, 20).fill('#F1F5F9');
-            doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
-            doc.text('Particulars / Fee Details', 30, tableTop + 5);
-            doc.text('Amount (Rs.)', doc.page.width - 120, tableTop + 5, { align: 'right' });
+            // Table Header
+            const tableTop = 188;
+            doc.rect(20, tableTop, doc.page.width - 40, 18).fill('#F1F5F9');
+            doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
+            doc.text('Particulars / Fee Details', 28, tableTop + 4);
+            doc.text('Amount (Rs.)', doc.page.width - 120, tableTop + 4, { align: 'right' });
 
-            doc.moveTo(20, tableTop + 20).lineTo(doc.page.width - 20, tableTop + 20).stroke('#CBD5E1');
+            doc.moveTo(20, tableTop + 18).lineTo(doc.page.width - 20, tableTop + 18).stroke('#CBD5E1');
 
-            let detailsY = tableTop + 30;
-            const cleanDetails = (data.details || 'School Tuition / Annual Fee').replace(/<br>/g, '\n');
-            doc.fillColor('#334155').fontSize(9).font('Helvetica');
-            doc.text(cleanDetails, 30, detailsY, { width: doc.page.width - 150 });
+            let detailsY = tableTop + 26;
+            const cleanDetails = (data.details || 'School Tuition / Session Fee').replace(/<br>/g, '\n');
+            doc.fillColor('#334155').fontSize(8.5).font('Helvetica');
+            doc.text(cleanDetails, 28, detailsY, { width: doc.page.width - 150 });
 
-            const totalBoxY = doc.page.height - 120;
-            doc.rect(20, totalBoxY, doc.page.width - 40, 30).fill('#1A365D');
-            doc.fillColor('#FFFFFF').fontSize(11).font('Helvetica-Bold');
-            doc.text('TOTAL AMOUNT PAID:', 30, totalBoxY + 9);
-            doc.text(`Rs. ${data.paid || 0}/-`, doc.page.width - 130, totalBoxY + 9, { align: 'right' });
+            // Total Amount Box
+            const totalBoxY = doc.page.height - 110;
+            doc.rect(20, totalBoxY, doc.page.width - 40, 26).fill('#1A365D');
+            doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold');
+            doc.text('TOTAL AMOUNT RECEIVED:', 28, totalBoxY + 8);
+            doc.text(`Rs. ${data.paid || 0}/-`, doc.page.width - 130, totalBoxY + 8, { align: 'right' });
 
-            const footerY = doc.page.height - 75;
-            doc.fillColor('#64748B').fontSize(7.5).font('Helvetica-Oblique');
-            doc.text('This is an officially generated digital fee receipt from JRD Public School Management.', 20, footerY, { align: 'center' });
-            doc.text('For queries, please contact the school administrative office.', 20, footerY + 11, { align: 'center' });
+            // Footer Signatures & Stamp
+            const footerY = doc.page.height - 70;
+            doc.fillColor('#64748B').fontSize(7).font('Helvetica-Oblique');
+            doc.text('This is an officially generated digital fee receipt from J.R.D. Public School Administration.', 20, footerY, { align: 'center' });
 
-            doc.rect(doc.page.width - 120, footerY - 5, 100, 35).lineWidth(0.5).stroke('#CBD5E1');
-            doc.fillColor('#0F172A').fontSize(7).font('Helvetica-Bold');
-            doc.text('AUTHORIZED STAMP', doc.page.width - 120, footerY + 10, { width: 100, align: 'center' });
+            doc.rect(doc.page.width - 115, footerY - 5, 95, 30).lineWidth(0.5).stroke('#CBD5E1');
+            doc.fillColor('#0F172A').fontSize(6.5).font('Helvetica-Bold');
+            doc.text('OFFICIAL SEAL & STAMP', doc.page.width - 115, footerY + 8, { width: 95, align: 'center' });
 
             doc.end();
         } catch (err) {
@@ -468,16 +450,78 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 🎙️ हिंदी में असली (महिला आवाज़) वॉइस नोट जनरेट करना — Google TTS (free) + ffmpeg से ogg/opus में कन्वर्ट
+// 📄 BRANDED OFFICIAL FEE REMINDER NOTICE PDF
+async function sendFeeReminderPdf(jid, data) {
+    return new Promise((resolve, reject) => {
+        try {
+            const doc = new PDFDocument({ size: 'A5', margin: 20 });
+            let buffers = [];
+
+            doc.on('data', buffers.push.bind(buffers));
+            doc.on('end', async () => {
+                const pdfBuffer = Buffer.concat(buffers);
+                if (sock && isBotReady) {
+                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 छात्र *${data.studentName || data.name || ''}* का आधिकारिक बहीखाता विवरण PDF।`;
+                    await sock.sendMessage(jid, {
+                        document: pdfBuffer,
+                        mimetype: 'application/pdf',
+                        fileName: `Fee_Reminder_${data.studentName || 'Notice'}.pdf`,
+                        caption: captionText
+                    });
+                }
+                resolve();
+            });
+
+            // Outer Red Border
+            doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#B91C1C');
+
+            // Header Banner
+            doc.rect(20, 20, doc.page.width - 40, 50).fill('#B91C1C');
+            doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 26, { align: 'center' });
+            doc.fontSize(8.5).font('Helvetica').text('Marui, Varanasi (U.P.) | Official Fee Reminder Statement', 20, 44, { align: 'center' });
+
+            // Student Info Box
+            const metaTop = 80;
+            doc.fillColor('#000000').fontSize(9).font('Helvetica-Bold');
+            doc.text(`Student Name: ${data.studentName || data.name || 'N/A'}`, 25, metaTop);
+            doc.text(`Class: ${data.className || 'N/A'}`, 25, metaTop + 15);
+            doc.text(`Enrolment: ${data.scholarNo || 'N/A'}`, doc.page.width - 160, metaTop);
+
+            doc.moveTo(20, metaTop + 30).lineTo(doc.page.width - 20, metaTop + 30).stroke('#E5E7EB');
+
+            // Statement Body
+            doc.fillColor('#1F2937').fontSize(8.5).font('Helvetica');
+            doc.text(`You are hereby requested to clear the outstanding school fee dues at the earliest. Detailed fee breakdown is attached below.`, 25, metaTop + 38, { width: doc.page.width - 50 });
+
+            // Total Due Banner
+            const dueY = doc.page.height - 90;
+            doc.rect(20, dueY, doc.page.width - 40, 26).fill('#FEF2F2');
+            doc.rect(20, dueY, doc.page.width - 40, 26).lineWidth(1).stroke('#EF4444');
+            doc.fillColor('#991B1B').fontSize(10).font('Helvetica-Bold');
+            doc.text('TOTAL OUTSTANDING DUES:', 28, dueY + 8);
+            doc.text(`Rs. ${data.totalAmount || 0}/-`, doc.page.width - 130, dueY + 8, { align: 'right' });
+
+            doc.fillColor('#6B7280').fontSize(7.5).font('Helvetica-Oblique');
+            doc.text('Principal / Accounts Administration — J.R.D. Public School', 20, doc.page.height - 40, { align: 'center' });
+
+            doc.end();
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+// 🎙️ मीठी और प्राकृतिक भारतीय महिला आवाज़ (Microsoft Swara Neural Engine)
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
     const oggPath = path.join(os.tmpdir(), `voice_${stamp}.ogg`);
 
-    return new Promise((resolve, reject) => {
-        const speech = new gTTS(text, 'hi'); // 'hi' = हिंदी, डिफ़ॉल्ट रूप से महिला आवाज़
-        speech.save(mp3Path, (err) => {
-            if (err) return reject(err);
+    return new Promise(async (resolve, reject) => {
+        try {
+            const tts = new MsEdgeTTS();
+            await tts.setMetadata('hi-IN-SwaraNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_STEREO);
+            await tts.toFile(mp3Path, text);
 
             ffmpeg(mp3Path)
                 .audioCodec('libopus')
@@ -499,21 +543,23 @@ async function generateHindiVoiceNote(text) {
                     reject(ffErr);
                 })
                 .save(oggPath);
-        });
+        } catch (err) {
+            reject(err);
+        }
     });
 }
 
 // 🔊 फीस जमा होने पर गार्जियन को हिंदी वॉइस नोट भेजना
 async function sendFeeVoiceNote(jid, data) {
     try {
-        const spokenText = `नमस्ते! ${data.name || 'छात्र'} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। धन्यवाद। जे आर डी पब्लिक स्कूल, मरुई, वाराणसी।`;
+        const spokenText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि छात्र ${data.name || data.studentName || ''} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। डिजिटल रसीद और विवरण हेतु संदेश देखें। धन्यवाद!`;
         const audioBuffer = await generateHindiVoiceNote(spokenText);
 
         if (sock && isBotReady) {
             await sock.sendMessage(jid, {
                 audio: audioBuffer,
                 mimetype: 'audio/ogg; codecs=opus',
-                ptt: true // true = वॉइस नोट जैसा दिखेगा (waveform के साथ), न कि साधारण ऑडियो फ़ाइल
+                ptt: true
             });
         }
     } catch (err) {
@@ -521,7 +567,7 @@ async function sendFeeVoiceNote(jid, data) {
     }
 }
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE WITH DUAL RECEIPT (TEXT + PDF)
+// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -537,24 +583,44 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (sock && (isBotReady || sock.user)) {
-                let cleanDet = (item.details || '').replace(/<br>/g, "\n");
-                let textToSend = item.message;
+                
+                // 🎯 1. अगर फीस बकाया रिमाइंडर भेज रहे हैं (2-Message Combo Delivery)
+                if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
+                    // A. पहला मैसेज: Swara Voice Note + Text Breakdown
+                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु मैसेज देखें। धन्यवाद!`;
+                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                    await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
 
-                if (!textToSend || textToSend.trim() === '') {
-                    textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+                    await sock.sendMessage(jid, { text: item.message });
+
+                    await new Promise(res => setTimeout(res, 2000));
+
+                    // B. दूसरा मैसेज: QR Code Image + 1-Click Pay Link + PDF Notice
+                    if (item.qrUrl) {
+                        await sock.sendMessage(jid, {
+                            image: { url: item.qrUrl },
+                            caption: `📲 *1-Click Direct Fee Payment Link:*\n${item.upiLink || ''}\n\n*(स्कैन करने हेतु इस QR कोड को गैलरी में सेव कर सकते हैं)*`
+                        });
+                    }
+
+                    await new Promise(res => setTimeout(res, 1500));
+                    await sendFeeReminderPdf(jid, item);
                 }
+                // 🎯 2. अगर वास्तव में काउंटर पर फीस जमा हुई है (FEE PAYMENT RECEIPT)
+                else {
+                    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
+                    let textToSend = item.message;
 
-                // 1. सुंदर टेक्स्ट मैसेज भेजना
-                const sent = await sock.sendMessage(jid, { text: textToSend });
-                if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: textToSend });
+                    if (!textToSend || textToSend.trim() === '') {
+                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+                    }
 
-                // 2. ऑटोमैटिक PDF रसीद जनरेट करके भेजना
-                await new Promise(res => setTimeout(res, 1500));
-                await sendFeePdfReceipt(jid, item);
-
-                // 3. हिंदी में वॉइस नोट भेजना (फीस कन्फर्मेशन बोलकर सुनाना)
-                await new Promise(res => setTimeout(res, 1500));
-                await sendFeeVoiceNote(jid, item);
+                    await sock.sendMessage(jid, { text: textToSend });
+                    await new Promise(res => setTimeout(res, 1500));
+                    await sendFeePdfReceipt(jid, item);
+                    await new Promise(res => setTimeout(res, 1500));
+                    await sendFeeVoiceNote(jid, item);
+                }
 
                 messageQueue.shift();
             } else {
@@ -573,7 +639,7 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 📩 ऐप्स स्क्रिप्ट से आने वाले फीस / बल्क मैसेज कतार में जोड़ना
+// 📩 ऐप्स स्क्रिप्ट / Analysis.html से आने वाले मैसेजेस
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -586,11 +652,16 @@ app.post('/enqueue-message', (req, res) => {
         number: targetPhone.toString(),
         message: body.message || "",
         type: body.type || 'GENERAL',
-        name: body.name || body.student_name || '',
+        name: body.name || body.student_name || body.studentName || '',
+        studentName: body.studentName || body.name || '',
         className: body.className || body.class || '',
         session: body.session || '2026-27',
         rid: body.rid || body.receipt_no || '',
         paid: body.paid || body.amount || 0,
+        totalAmount: body.totalAmount || 0,
+        voiceText: body.voiceText || '',
+        upiLink: body.upiLink || '',
+        qrUrl: body.qrUrl || '',
         details: body.details || ''
     });
 
@@ -599,7 +670,6 @@ app.post('/enqueue-message', (req, res) => {
     return res.status(200).json({ status: 'queued', queue_length: messageQueue.length });
 });
 
-// 📩 डायरेक्ट मैसेज सेंड API
 app.post('/send-whatsapp', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
@@ -649,7 +719,6 @@ app.get('/reset-qr', (req, res) => {
     res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
 
-// 🧹 पुरानी/ग़लत LID→Phone कैश एंट्रीज़ को हटाने के लिए (ज़रूरत पड़ने पर एक बार उपयोग करें, फिर हटा दें)
 app.get('/clear-lid-cache', (req, res) => {
     try {
         if (fs.existsSync(LID_MAP_FILE)) {
@@ -671,7 +740,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
 
-// ⚡ 4 मिनट में रेलवे सर्वर को अलाइव रखने वाला सेल्फ-पिंग
+// ⚡ Self-Ping Engine
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful');
@@ -679,7 +748,8 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-// 👩‍🏫 पूरे 31 दिनों के अलग-अलग विचारों के साथ टीचर अटेंडेंस राउट
+
+// 👩‍🏫 पूरे 31 दिनों के विचारों के साथ अटेंडेंस राउट
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
@@ -693,11 +763,9 @@ app.post('/send-attendance', async (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Missing phone number' });
     }
 
-// 🎯 1. टाइम क्लीनअप (Asia/Kolkata Timezone + IST Force Fix)
     let rawTime = String(body.time || body.in_time || body.out_time || '').trim();
     let cleanTime = '';
 
-    // अगर समय में 1899, GMT, UTC है या खाली है, तो 1899 को parse मत करो — सीधे वर्तमान भारतीय समय लो
     if (rawTime.includes('1899') || rawTime.includes('GMT') || rawTime.includes('T') || rawTime === '' || rawTime === '--') {
         cleanTime = new Date().toLocaleTimeString('en-US', {
             timeZone: 'Asia/Kolkata',
@@ -706,10 +774,9 @@ app.post('/send-attendance', async (req, res) => {
             hour12: true
         });
     } else {
-        cleanTime = rawTime; // अगर पहले से साफ़ समय '01:40 PM' भेजा गया है
+        cleanTime = rawTime;
     }
 
-    // 🎯 2. दिनांक भी शुद्ध भारतीय समय (Asia/Kolkata) के अनुसार
     let todayStr = new Date().toLocaleDateString('en-IN', {
         timeZone: 'Asia/Kolkata',
         day: '2-digit',
@@ -717,10 +784,8 @@ app.post('/send-attendance', async (req, res) => {
         year: 'numeric'
     });
 
-    // 🎯 2. आज की तारीख (1 से 31) निकालें
-    const dayOfMonth = new Date().getDate(); // 1, 2, 3 ... 31
+    const dayOfMonth = new Date().getDate();
 
-    // 🟢 पूरे 31 दिनों के लिए IN-TIME विचार
     const inQuotes = {
         1: "एक नए महीने की शुरुआत! आइए, नए संकल्पों के साथ बच्चों के भविष्य को उज्ज्वल बनाएं।",
         2: "शिक्षक वह दीप है जो स्वयं जलकर दूसरों के जीवन को आलोकित करता है। आपका स्वागत है!",
@@ -752,10 +817,9 @@ app.post('/send-attendance', async (req, res) => {
         28: "शिक्षक वह सीढ़ी है जो खुद वहीं रहती है, पर दूसरों को ऊंचाइयों पर पहुंचा देती है।",
         29: "आपकी निष्ठा और समर्पण ही इस विद्यालय की असली ताकत है। शुभ प्रभात!",
         30: "सिखाने की कला ही एक शिक्षक को महान बनाती है। आज फिर कुछ नया रचें!",
-        31: "महीने का अंतिम दिन! आपके अटथ प्रयासों से इस महीने कई नए अध्याय लिखे गए हैं।"
+        31: "महीने का अंतिम दिन! आपके अथक प्रयासों से इस महीने कई नए अध्याय लिखे गए हैं।"
     };
 
-    // 🔴 पूरे 31 दिनों के लिए OUT-TIME आभार संदेश
     const outQuotes = {
         1: "महीने के पहले दिन आपकी उत्कृष्ट सेवा और मेहनत के लिए धन्यवाद। विश्राम करें और कल पुनः मिलें!",
         2: "आज दिन भर बच्चों के भविष्य को संवारने में दिए गए योगदान के लिए आभार। आपकी शाम सुखद रहे!",
@@ -806,14 +870,11 @@ app.post('/send-attendance', async (req, res) => {
 
         if (type === 'TEACHER_ATTENDANCE') {
             if (attType === 'OUT') {
-                // 🔴 OUT-TIME MESSAGE
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n🚩 *शिक्षक प्रस्थान (OUT-TIME)*\n\nआदरणीय *${name}* जी,\n\n🕒 *प्रस्थान समय:* ${cleanTime}\n🏁 *स्थिति:* कार्य दिवस पूर्ण ✅\n\n🌺 *आज का आभार संदेश:*\n_"${todayOutQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
             } else {
-                // 🟢 IN-TIME MESSAGE
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n📋 *शिक्षक उपस्थिति (IN-TIME)*\n\nआदरणीय *${name}* जी,\nविद्यालय में आपका हार्दिक स्वागत है!\n\n🕒 *आगमन समय:* ${cleanTime}\n✅ *स्थिति:* PRESENT (उपस्थित)\n\n💭 *आज का प्रेरणादायी विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
             }
         } else {
-            // स्टूडेंट मैसेज
             const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
             if (isAbsent) {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *उपस्थिति सूचना (ABSENT)*\n\nप्रिय अभिभावक,\nआपका बच्चा *${name}* (कक्षा: ${className}) आज विद्यालय में **अनुपस्थित (ABSENT)** है।\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
@@ -824,6 +885,10 @@ app.post('/send-attendance', async (req, res) => {
 
         const sent = await sock.sendMessage(jid, { text: messageText });
         if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
+
+        if (updateAttendanceSmsStatus && body.attendance_id) {
+            updateAttendanceSmsStatus(body.attendance_id, 'SENT');
+        }
 
         return res.status(200).json({ status: 'success', message: 'Attendance message sent successfully' });
     } catch (error) {
