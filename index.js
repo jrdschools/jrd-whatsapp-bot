@@ -11,6 +11,7 @@ const path = require('path');
 const os = require('os');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // 🗄️ Database Import
@@ -27,6 +28,9 @@ try {
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
+// 🎙️ Indian Hindi Female Voice (Microsoft Edge Neural TTS) — नॉन-रोबोटिक
+const HINDI_FEMALE_VOICE = "hi-IN-SwaraNeural";
+
 // 📇 PDF Safe Text Helper (PDFKit क्रैश रोकने के लिए)
 function safePdfText(str, fallback = 'N/A') {
     if (!str) return fallback;
@@ -41,7 +45,6 @@ function calculateDynamicDue(student) {
     const oldDue = parseFloat(student.old_due || 0);
     const totalPaid = parseFloat(student.total_paid || student.paid || 0);
 
-    // अप्रैल (महीना 4) से चालू महीने तक की गणना
     const currentMonth = new Date().getMonth() + 1;
     let elapsedMonths = 0;
     if (currentMonth >= 4) {
@@ -50,7 +53,6 @@ function calculateDynamicDue(student) {
         elapsedMonths = currentMonth + 9;
     }
 
-    // RTE श्रेणी हेतु ट्यूशन फ़ीस शून्य
     let actualMonthlyFee = (studentType === 'RTE') ? 0 : monthlyFee;
     let expectedTillMonth = actualMonthlyFee * elapsedMonths;
     let currentDue = Math.max(0, expectedTillMonth - totalPaid);
@@ -545,27 +547,22 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 
-// 🎙️ Google Direct Voice Engine (100% Reliable & Crash-Free)
+// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS — नॉन-रोबोटिक, नेचुरल आवाज़)
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
     const oggPath = path.join(os.tmpdir(), `voice_${stamp}.ogg`);
 
     try {
-        const encodedText = encodeURIComponent(text);
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=hi&client=tw-ob`;
-
-        const response = await axios({
-            method: 'get',
-            url: ttsUrl,
-            responseType: 'stream',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
+        // 1️⃣ Primary Engine: Microsoft Edge Neural TTS (hi-IN-SwaraNeural — Indian girl voice)
+        const tts = new MsEdgeTTS();
+        await tts.setMetadata(HINDI_FEMALE_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+        const { audioStream } = await tts.toStream(text);
 
         const writer = fs.createWriteStream(mp3Path);
-        response.data.pipe(writer);
-
         await new Promise((resolve, reject) => {
+            audioStream.pipe(writer);
+            audioStream.on('error', reject);
             writer.on('finish', resolve);
             writer.on('error', reject);
         });
@@ -593,9 +590,54 @@ async function generateHindiVoiceNote(text) {
                 .save(oggPath);
         });
     } catch (err) {
-        console.error('❌ Direct Voice Engine Error:', err.message);
-        try { if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path); } catch (e) {}
-        return null;
+        console.error('❌ Edge TTS Engine Error, फॉलबैक इस्तेमाल हो रहा है:', err.message);
+        // 2️⃣ Fallback Engine: अगर Edge TTS fail हो जाए तो पुराना Google TTS बैकअप के रूप में चलेगा
+        try {
+            const encodedText = encodeURIComponent(text);
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=hi&client=tw-ob`;
+
+            const response = await axios({
+                method: 'get',
+                url: ttsUrl,
+                responseType: 'stream',
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+
+            const writer = fs.createWriteStream(mp3Path);
+            response.data.pipe(writer);
+
+            await new Promise((resolve, reject) => {
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+            });
+
+            return await new Promise((resolve) => {
+                ffmpeg(mp3Path)
+                    .audioCodec('libopus')
+                    .audioBitrate('32k')
+                    .audioChannels(1)
+                    .format('ogg')
+                    .on('end', () => {
+                        try {
+                            const buffer = fs.readFileSync(oggPath);
+                            try { fs.unlinkSync(mp3Path); } catch (e) {}
+                            try { fs.unlinkSync(oggPath); } catch (e) {}
+                            resolve(buffer);
+                        } catch (readErr) {
+                            resolve(null);
+                        }
+                    })
+                    .on('error', (ffErr) => {
+                        try { fs.unlinkSync(mp3Path); } catch (e) {}
+                        resolve(null);
+                    })
+                    .save(oggPath);
+            });
+        } catch (fallbackErr) {
+            console.error('❌ Fallback Voice Engine भी विफल:', fallbackErr.message);
+            try { if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path); } catch (e) {}
+            return null;
+        }
     }
 }
 
@@ -633,13 +675,11 @@ async function processQueue() {
             const jid = formattedNumber + '@s.whatsapp.net';
 
             if (sock && (isBotReady || sock.user)) {
-                
-                // 🎯 1. अगर फीस बकाया रिमाइंडर भेज रहे हैं (2-Message Combo Delivery)
+
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
-                    // A. पहला मैसेज: Voice Note + Text Breakdown
                     const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु संदेश देखें। धन्यवाद!`;
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
-                    
+
                     if (audioBuffer) {
                         await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
                     }
@@ -648,7 +688,6 @@ async function processQueue() {
 
                     await new Promise(res => setTimeout(res, 2000));
 
-                    // B. दूसरा मैसेज: QR Code Image + 1-Click Pay Link + PDF Notice
                     if (item.qrUrl) {
                         await sock.sendMessage(jid, {
                             image: { url: item.qrUrl },
@@ -659,11 +698,9 @@ async function processQueue() {
                     await new Promise(res => setTimeout(res, 1500));
                     await sendFeeReminderPdf(jid, item);
                 }
-                // 🎯 2. अगर एडमिशन कन्फर्मेशन मैसेज है
                 else if (item.type === 'ADMISSION_CONFIRMATION') {
                     await sock.sendMessage(jid, { text: item.message });
                 }
-                // 🎯 3. अगर वास्तव में काउंटर पर फीस जमा हुई है (FEE PAYMENT RECEIPT)
                 else {
                     let cleanDet = (item.details || '').replace(/<br>/g, "\n");
                     let textToSend = item.message;
@@ -696,7 +733,6 @@ async function processQueue() {
     isProcessingQueue = false;
 }
 
-// 📩 ऐप्स स्क्रिप्ट / Analysis.html से आने वाले मैसेजेस
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -747,7 +783,6 @@ app.post('/send-whatsapp', async (req, res) => {
     }
 });
 
-// 🌐 QR कोड और वेब रूट्स
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP बोट व्हाट्सएप से कनेक्टेड है!</h2>');
@@ -797,7 +832,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
 
-// ⚡ Self-Ping Engine
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful');
@@ -806,7 +840,6 @@ setInterval(() => {
     });
 }, 4 * 60 * 1000);
 
-// 👩‍🏫 पूरे 31 दिनों के विचारों के साथ अटेंडेंस राउट
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
