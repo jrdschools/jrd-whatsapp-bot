@@ -517,7 +517,7 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 
-// 🎙️ 100% Guaranteed High-Quality Direct Voice Engine (No Python / No Crash)
+// 🎙️ Google Direct Voice Engine (100% Reliable & Crash-Free)
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
@@ -609,7 +609,7 @@ async function processQueue() {
                 // 🎯 1. अगर फीस बकाया रिमाइंडर भेज रहे हैं (2-Message Combo Delivery)
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
                     // A. पहला मैसेज: Voice Note + Text Breakdown
-                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु संदेश देखें। धन्यवाद!`;
+                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु मैसेज देखें। धन्यवाद!`;
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
                     
                     if (audioBuffer) {
