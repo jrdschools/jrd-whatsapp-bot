@@ -13,7 +13,7 @@ const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// 🗄️ Database Connection Import
+// 🗄️ Database Import
 let updateAttendanceSmsStatus, testDbConnection;
 try {
     const db = require('./db');
@@ -21,20 +21,51 @@ try {
     testDbConnection = db.testDbConnection;
     if (testDbConnection) testDbConnection();
 } catch (e) {
-    console.log('⚠️ db.js फ़ाइल उपलब्ध नहीं है या स्किप की गई है।');
+    console.log('⚠️ db.js उपलब्ध नहीं है या स्किप किया गया।');
 }
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-// 📇 PDF Safe Text Helper (Prevents PDFKit encoding crash on non-Latin characters)
+// 📇 PDF Safe Text Helper (PDFKit क्रैश रोकने के लिए)
 function safePdfText(str, fallback = 'N/A') {
     if (!str) return fallback;
     let clean = String(str).replace(/[^\x00-\x7F]/g, '').trim();
     return clean.length > 0 ? clean : fallback;
 }
 
-// 📇 LID (WhatsApp की नई Privacy ID) → असली मोबाइल नंबर की मैपिंग 
+// 📊 On-Demand Dynamic Fee Calculator (Student Type के अनुसार)
+function calculateDynamicDue(student) {
+    const monthlyFee = parseFloat(student.monthly_fee || student.tuition_fee || 0);
+    const studentType = String(student.type || student.student_type || 'REGULAR').toUpperCase();
+    const oldDue = parseFloat(student.old_due || 0);
+    const totalPaid = parseFloat(student.total_paid || student.paid || 0);
+
+    // अप्रैल (Month 4) से चालू माह तक के महीनों की संख्या
+    const currentMonth = new Date().getMonth() + 1;
+    let elapsedMonths = 0;
+    if (currentMonth >= 4) {
+        elapsedMonths = currentMonth - 3;
+    } else {
+        elapsedMonths = currentMonth + 9;
+    }
+
+    // RTE छात्रों के लिए ट्यूशन फ़ीस शून्य
+    let actualMonthlyFee = (studentType === 'RTE') ? 0 : monthlyFee;
+    let expectedTillMonth = actualMonthlyFee * elapsedMonths;
+    let currentDue = Math.max(0, expectedTillMonth - totalPaid);
+    let grandTotalDue = currentDue + oldDue;
+
+    return {
+        elapsedMonths,
+        expectedTillMonth,
+        currentDue,
+        oldDue,
+        grandTotalDue
+    };
+}
+
+// 📇 LID (WhatsApp Privacy ID) Mapping
 const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
 let lidPhoneMap = {};
 
@@ -45,7 +76,6 @@ function loadLidPhoneMap() {
             console.log(`📇 LID मैपिंग कैश लोड हुआ (${Object.keys(lidPhoneMap).length} एंट्री)`);
         }
     } catch (e) {
-        console.error('❌ LID मैपिंग कैश लोड करने में त्रुटि:', e.message);
         lidPhoneMap = {};
     }
 }
@@ -56,9 +86,7 @@ function saveLidPhoneMapping(lidJid, phone) {
         lidPhoneMap[lidJid] = phone;
         fs.writeFileSync(LID_MAP_FILE, JSON.stringify(lidPhoneMap, null, 2));
         console.log(`📇 नई LID मैपिंग याद रखी: ${lidJid} → ${phone}`);
-    } catch (e) {
-        console.error('❌ LID मैपिंग सेव करने में त्रुटि:', e.message);
-    }
+    } catch (e) {}
 }
 
 loadLidPhoneMap();
@@ -81,7 +109,6 @@ let currentQrCode = '';
 let isBotReady = false;
 let isConnecting = false;
 
-// 🧹 ऑथ फ़ोल्डर क्लीनर
 function forceClearAuthFolder() {
     try {
         if (sock) {
@@ -350,7 +377,8 @@ async function sendReply(jid, text) {
 }
 
 async function sendStudentProfileCard(jid, s) {
-    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (${s.session || '2026-27'}):* ₹${s.current_due || 0}\n• *पिछला बकाया (Old Due):* ₹${s.old_due || 0}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${s.grand_due || 0}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
+    const calc = calculateDynamicDue(s);
+    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (टिल मन्थ):* ₹${calc.currentDue}\n• *पिछला बकाया (Old Due):* ₹${calc.oldDue}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${calc.grandTotalDue}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
@@ -609,7 +637,7 @@ async function processQueue() {
                 // 🎯 1. अगर फीस बकाया रिमाइंडर भेज रहे हैं (2-Message Combo Delivery)
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
                     // A. पहला मैसेज: Voice Note + Text Breakdown
-                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु मैसेज देखें। धन्यवाद!`;
+                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु संदेश देखें। धन्यवाद!`;
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
                     
                     if (audioBuffer) {
@@ -631,7 +659,11 @@ async function processQueue() {
                     await new Promise(res => setTimeout(res, 1500));
                     await sendFeeReminderPdf(jid, item);
                 }
-                // 🎯 2. अगर वास्तव में काउंटर पर फीस जमा हुई है (FEE PAYMENT RECEIPT)
+                // 🎯 2. अगर एडमिशन कन्फर्मेशन मैसेज है
+                else if (item.type === 'ADMISSION_CONFIRMATION') {
+                    await sock.sendMessage(jid, { text: item.message });
+                }
+                // 🎯 3. अगर वास्तव में काउंटर पर फीस जमा हुई है (FEE PAYMENT RECEIPT)
                 else {
                     let cleanDet = (item.details || '').replace(/<br>/g, "\n");
                     let textToSend = item.message;
