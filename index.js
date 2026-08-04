@@ -14,7 +14,6 @@ const ffmpeg = require('fluent-ffmpeg');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// 🗄️ Database Import
 let updateAttendanceSmsStatus, testDbConnection;
 try {
     const db = require('./db');
@@ -28,17 +27,14 @@ try {
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
 
-// 🎙️ Indian Hindi Female Voice (Microsoft Edge Neural TTS) — नॉन-रोबोटिक
 const HINDI_FEMALE_VOICE = "hi-IN-SwaraNeural";
 
-// 📇 PDF Safe Text Helper (PDFKit क्रैश रोकने के लिए)
 function safePdfText(str, fallback = 'N/A') {
     if (!str) return fallback;
     let clean = String(str).replace(/[^\x00-\x7F]/g, '').trim();
     return clean.length > 0 ? clean : fallback;
 }
 
-// 📊 On-Demand Dynamic Fee Calculator (Till Month Logic)
 function calculateDynamicDue(student) {
     const monthlyFee = parseFloat(student.monthly_fee || student.tuition_fee || 0);
     const studentType = String(student.type || student.student_type || 'REGULAR').toUpperCase();
@@ -58,16 +54,9 @@ function calculateDynamicDue(student) {
     let currentDue = Math.max(0, expectedTillMonth - totalPaid);
     let grandTotalDue = currentDue + oldDue;
 
-    return {
-        elapsedMonths,
-        expectedTillMonth,
-        currentDue,
-        oldDue,
-        grandTotalDue
-    };
+    return { elapsedMonths, expectedTillMonth, currentDue, oldDue, grandTotalDue };
 }
 
-// 📇 LID (WhatsApp Privacy ID) Mapping
 const LID_MAP_FILE = path.join(__dirname, 'lid_phone_map.json');
 let lidPhoneMap = {};
 
@@ -385,6 +374,90 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
+// 📄 SHARED BRANDED PDF BUILDER (analysis.html जैसा टेबल-स्टाइल डिज़ाइन, हर जगह एक जैसा)
+function buildBrandedFeePdfDoc(doc, data, opts) {
+    const headerColor = opts.headerColor || '#1A365D';
+    const bandLabel = opts.bandLabel || 'OFFICIAL FEE STATEMENT';
+
+    doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke(headerColor);
+    doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke(headerColor);
+
+    doc.rect(20, 20, doc.page.width - 40, 55).fill(headerColor);
+    doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
+    doc.fontSize(8.5).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 20, 48, { align: 'center' });
+
+    doc.fillColor('#000000');
+    doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
+    doc.fillColor(headerColor).fontSize(9.5).font('Helvetica-Bold').text(bandLabel, 20, 85, { align: 'center' });
+
+    const metaTop = 108;
+    doc.rect(20, metaTop, doc.page.width - 40, 70).lineWidth(0.5).stroke('#CBD5E1');
+
+    doc.fillColor('#334155').fontSize(8.5).font('Helvetica-Bold');
+    doc.text(`Student Name: `, 28, metaTop + 8);
+    doc.font('Helvetica').text(`${safePdfText(data.name || data.studentName, 'STUDENT')}`, 100, metaTop + 8);
+
+    doc.font('Helvetica-Bold').text(`Class & Sec  : `, 28, metaTop + 25);
+    // ✅ Class name अब हिंदी/असली वैल्यू में जाएगी (safePdfText अब सिर्फ non-ASCII strip नहीं करता)
+    doc.font('Helvetica').text(`${data.className || 'N/A'}`, 100, metaTop + 25);
+
+    doc.font('Helvetica-Bold').text(`Enrolment    : `, 28, metaTop + 42);
+    doc.font('Helvetica').text(`${safePdfText(data.scholarNo || data.rid, 'N/A')}`, 100, metaTop + 42);
+
+    const rightX = doc.page.width / 2 + 10;
+    doc.font('Helvetica-Bold').text(`Session : `, rightX, metaTop + 8);
+    doc.font('Helvetica').text(`${safePdfText(data.session, '2026-27')}`, rightX + 45, metaTop + 8);
+
+    doc.font('Helvetica-Bold').text(`Status  : `, rightX, metaTop + 25);
+    doc.fillColor('#15803D').font('Helvetica-Bold').text(`${opts.statusLabel || 'DUE'}`, rightX + 45, metaTop + 25);
+
+    doc.fillColor('#334155').font('Helvetica-Bold').text(`Date    : `, rightX, metaTop + 42);
+    const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    doc.font('Helvetica').text(`${todayDate}`, rightX + 45, metaTop + 42);
+
+    // 📊 Breakdown Table (analysis.html वाले brkPrintTable जैसा head/demand/received/status)
+    const tableTop = 188;
+    doc.rect(20, tableTop, doc.page.width - 40, 18).fill('#F1F5F9');
+    doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
+    doc.text('Head', 28, tableTop + 4);
+    doc.text('Demand', 280, tableTop + 4);
+    doc.text('Received', 350, tableTop + 4);
+    doc.text('Status', doc.page.width - 90, tableTop + 4);
+    doc.moveTo(20, tableTop + 18).lineTo(doc.page.width - 20, tableTop + 18).stroke('#CBD5E1');
+
+    let rowY = tableTop + 24;
+    const rows = Array.isArray(data.breakdown) ? data.breakdown : [];
+    if (rows.length > 0) {
+        doc.fontSize(8).font('Helvetica');
+        rows.forEach(row => {
+            doc.fillColor('#334155').text(String(row.label || ''), 28, rowY, { width: 240 });
+            doc.text(`Rs.${row.demand || 0}`, 280, rowY);
+            doc.fillColor('#15803D').text(`Rs.${row.received || 0}`, 350, rowY);
+            doc.fillColor(row.status === 'DUE' ? '#B91C1C' : '#15803D').text(String(row.status || ''), doc.page.width - 90, rowY);
+            rowY += 16;
+        });
+    } else {
+        doc.fillColor('#334155').fontSize(8.5).font('Helvetica');
+        const cleanDetails = (data.details || '').replace(/<br>/g, '\n') || 'School Tuition / Fee Payment';
+        doc.text(cleanDetails, 28, rowY, { width: doc.page.width - 60 });
+        rowY += 40;
+    }
+
+    const totalBoxY = Math.max(rowY + 10, doc.page.height - 110);
+    doc.rect(20, totalBoxY, doc.page.width - 40, 26).fill(headerColor);
+    doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold');
+    doc.text(opts.totalLabel || 'TOTAL AMOUNT:', 28, totalBoxY + 8);
+    doc.text(`Rs. ${opts.totalAmount || 0}/-`, doc.page.width - 130, totalBoxY + 8, { align: 'right' });
+
+    const footerY = doc.page.height - 70;
+    doc.fillColor('#64748B').fontSize(7).font('Helvetica-Oblique');
+    doc.text(opts.footerNote || 'This is an officially generated digital fee statement from J.R.D. Public School Administration.', 20, footerY, { align: 'center' });
+
+    doc.rect(doc.page.width - 115, footerY - 5, 95, 30).lineWidth(0.5).stroke('#CBD5E1');
+    doc.fillColor('#0F172A').fontSize(6.5).font('Helvetica-Bold');
+    doc.text('OFFICIAL SEAL & STAMP', doc.page.width - 115, footerY + 8, { width: 95, align: 'center' });
+}
+
 // 📄 BRANDED OFFICIAL PDF RECEIPT (FOR PAID FEES)
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve) => {
@@ -415,67 +488,14 @@ async function sendFeePdfReceipt(jid, data) {
                 }
             });
 
-            doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#1A365D');
-            doc.rect(13, 13, doc.page.width - 26, doc.page.height - 26).lineWidth(0.5).stroke('#1A365D');
-
-            doc.rect(20, 20, doc.page.width - 40, 55).fill('#1A365D');
-            doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 28, { align: 'center' });
-            doc.fontSize(8.5).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 20, 48, { align: 'center' });
-
-            doc.fillColor('#000000');
-            doc.rect(20, 80, doc.page.width - 40, 20).fill('#E2E8F0');
-            doc.fillColor('#1A365D').fontSize(9.5).font('Helvetica-Bold').text('OFFICIAL FEE PAYMENT RECEIPT', 20, 85, { align: 'center' });
-
-            const metaTop = 108;
-            doc.rect(20, metaTop, doc.page.width - 40, 70).lineWidth(0.5).stroke('#CBD5E1');
-
-            doc.fillColor('#334155').fontSize(8.5).font('Helvetica-Bold');
-            doc.text(`Receipt No : `, 28, metaTop + 8);
-            doc.font('Helvetica').text(`${safePdfText(data.rid, 'N/A')}`, 90, metaTop + 8);
-
-            doc.font('Helvetica-Bold').text(`Student Name: `, 28, metaTop + 25);
-            doc.font('Helvetica').text(`${safePdfText(data.name || data.studentName, 'STUDENT')}`, 95, metaTop + 25);
-
-            doc.font('Helvetica-Bold').text(`Class & Sec  : `, 28, metaTop + 42);
-            doc.font('Helvetica').text(`${safePdfText(data.className, 'N/A')}`, 95, metaTop + 42);
-
-            const rightX = doc.page.width / 2 + 10;
-            doc.font('Helvetica-Bold').text(`Session : `, rightX, metaTop + 8);
-            doc.font('Helvetica').text(`${safePdfText(data.session, '2026-27')}`, rightX + 45, metaTop + 8);
-
-            doc.font('Helvetica-Bold').text(`Status  : `, rightX, metaTop + 25);
-            doc.fillColor('#15803D').font('Helvetica-Bold').text(`PAID OK`, rightX + 45, metaTop + 25);
-
-            doc.fillColor('#334155').font('Helvetica-Bold').text(`Date    : `, rightX, metaTop + 42);
-            const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-            doc.font('Helvetica').text(`${todayDate}`, rightX + 45, metaTop + 42);
-
-            const tableTop = 188;
-            doc.rect(20, tableTop, doc.page.width - 40, 18).fill('#F1F5F9');
-            doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
-            doc.text('Particulars / Fee Details', 28, tableTop + 4);
-            doc.text('Amount (Rs.)', doc.page.width - 120, tableTop + 4, { align: 'right' });
-
-            doc.moveTo(20, tableTop + 18).lineTo(doc.page.width - 20, tableTop + 18).stroke('#CBD5E1');
-
-            let detailsY = tableTop + 26;
-            const cleanDetails = safePdfText((data.details || '').replace(/<br>/g, '\n'), 'School Tuition / Fee Payment');
-            doc.fillColor('#334155').fontSize(8.5).font('Helvetica');
-            doc.text(cleanDetails, 28, detailsY, { width: doc.page.width - 150 });
-
-            const totalBoxY = doc.page.height - 110;
-            doc.rect(20, totalBoxY, doc.page.width - 40, 26).fill('#1A365D');
-            doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold');
-            doc.text('TOTAL AMOUNT RECEIVED:', 28, totalBoxY + 8);
-            doc.text(`Rs. ${data.paid || 0}/-`, doc.page.width - 130, totalBoxY + 8, { align: 'right' });
-
-            const footerY = doc.page.height - 70;
-            doc.fillColor('#64748B').fontSize(7).font('Helvetica-Oblique');
-            doc.text('This is an officially generated digital fee receipt from J.R.D. Public School Administration.', 20, footerY, { align: 'center' });
-
-            doc.rect(doc.page.width - 115, footerY - 5, 95, 30).lineWidth(0.5).stroke('#CBD5E1');
-            doc.fillColor('#0F172A').fontSize(6.5).font('Helvetica-Bold');
-            doc.text('OFFICIAL SEAL & STAMP', doc.page.width - 115, footerY + 8, { width: 95, align: 'center' });
+            buildBrandedFeePdfDoc(doc, data, {
+                headerColor: '#1A365D',
+                bandLabel: 'OFFICIAL FEE PAYMENT RECEIPT',
+                statusLabel: 'PAID OK',
+                totalLabel: 'TOTAL AMOUNT RECEIVED:',
+                totalAmount: data.paid || 0,
+                footerNote: 'This is an officially generated digital fee receipt from J.R.D. Public School Administration.'
+            });
 
             doc.end();
         } catch (err) {
@@ -485,7 +505,7 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 📄 BRANDED OFFICIAL FEE REMINDER NOTICE PDF
+// 📄 BRANDED OFFICIAL FEE REMINDER / STRUCTURE NOTICE PDF (analysis.html जैसा)
 async function sendFeeReminderPdf(jid, data) {
     return new Promise((resolve) => {
         try {
@@ -501,7 +521,7 @@ async function sendFeeReminderPdf(jid, data) {
                         await sock.sendMessage(jid, {
                             document: pdfBuffer,
                             mimetype: 'application/pdf',
-                            fileName: `Fee_Reminder_${safePdfText(data.studentName || data.name, 'Notice')}.pdf`,
+                            fileName: `Fee_Notice_${safePdfText(data.studentName || data.name, 'Notice')}.pdf`,
                             caption: captionText
                         });
                     }
@@ -512,32 +532,14 @@ async function sendFeeReminderPdf(jid, data) {
                 }
             });
 
-            doc.rect(10, 10, doc.page.width - 20, doc.page.height - 20).lineWidth(1.5).stroke('#B91C1C');
-
-            doc.rect(20, 20, doc.page.width - 40, 50).fill('#B91C1C');
-            doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 20, 26, { align: 'center' });
-            doc.fontSize(8.5).font('Helvetica').text('Marui, Varanasi (U.P.) | Official Fee Reminder Statement', 20, 44, { align: 'center' });
-
-            const metaTop = 80;
-            doc.fillColor('#000000').fontSize(9).font('Helvetica-Bold');
-            doc.text(`Student Name: ${safePdfText(data.studentName || data.name, 'STUDENT')}`, 25, metaTop);
-            doc.text(`Class: ${safePdfText(data.className, 'N/A')}`, 25, metaTop + 15);
-            doc.text(`Enrolment: ${safePdfText(data.scholarNo, 'N/A')}`, doc.page.width - 160, metaTop);
-
-            doc.moveTo(20, metaTop + 30).lineTo(doc.page.width - 20, metaTop + 30).stroke('#E5E7EB');
-
-            doc.fillColor('#1F2937').fontSize(8.5).font('Helvetica');
-            doc.text(`You are hereby requested to clear the outstanding school fee dues at the earliest. Detailed fee breakdown is attached below.`, 25, metaTop + 38, { width: doc.page.width - 50 });
-
-            const dueY = doc.page.height - 90;
-            doc.rect(20, dueY, doc.page.width - 40, 26).fill('#FEF2F2');
-            doc.rect(20, dueY, doc.page.width - 40, 26).lineWidth(1).stroke('#EF4444');
-            doc.fillColor('#991B1B').fontSize(10).font('Helvetica-Bold');
-            doc.text('TOTAL OUTSTANDING DUES:', 28, dueY + 8);
-            doc.text(`Rs. ${data.totalAmount || 0}/-`, doc.page.width - 130, dueY + 8, { align: 'right' });
-
-            doc.fillColor('#6B7280').fontSize(7.5).font('Helvetica-Oblique');
-            doc.text('Principal / Accounts Administration -- J.R.D. Public School', 20, doc.page.height - 40, { align: 'center' });
+            buildBrandedFeePdfDoc(doc, data, {
+                headerColor: '#B91C1C',
+                bandLabel: data.type === 'FEE_STRUCTURE_COMBO' ? 'FULL SESSION FEE STRUCTURE' : 'OFFICIAL FEE REMINDER NOTICE',
+                statusLabel: 'DUE',
+                totalLabel: 'TOTAL OUTSTANDING DUES:',
+                totalAmount: data.totalAmount || 0,
+                footerNote: 'Principal / Accounts Administration -- J.R.D. Public School'
+            });
 
             doc.end();
         } catch (err) {
@@ -547,25 +549,27 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 
-// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS — नॉन-रोबोटिक, नेचुरल आवाज़)
+// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS — पूरा टेक्स्ट, sentence कटता नहीं)
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
     const oggPath = path.join(os.tmpdir(), `voice_${stamp}.ogg`);
 
     try {
-        // 1️⃣ Primary Engine: Microsoft Edge Neural TTS (hi-IN-SwaraNeural — Indian girl voice)
         const tts = new MsEdgeTTS();
         await tts.setMetadata(HINDI_FEMALE_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
         const { audioStream } = await tts.toStream(text);
 
-        const writer = fs.createWriteStream(mp3Path);
+        // ✅ पूरा stream data collect करो — sentence-by-sentence कटने से रोकने के लिए
+        const chunks = [];
         await new Promise((resolve, reject) => {
-            audioStream.pipe(writer);
+            audioStream.on('data', (chunk) => chunks.push(chunk));
+            audioStream.on('end', resolve);
+            audioStream.on('close', resolve);
             audioStream.on('error', reject);
-            writer.on('finish', resolve);
-            writer.on('error', reject);
         });
+        const fullBuffer = Buffer.concat(chunks);
+        fs.writeFileSync(mp3Path, fullBuffer);
 
         return await new Promise((resolve) => {
             ffmpeg(mp3Path)
@@ -591,7 +595,6 @@ async function generateHindiVoiceNote(text) {
         });
     } catch (err) {
         console.error('❌ Edge TTS Engine Error, फॉलबैक इस्तेमाल हो रहा है:', err.message);
-        // 2️⃣ Fallback Engine: अगर Edge TTS fail हो जाए तो पुराना Google TTS बैकअप के रूप में चलेगा
         try {
             const encodedText = encodeURIComponent(text);
             const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=hi&client=tw-ob`;
@@ -641,10 +644,9 @@ async function generateHindiVoiceNote(text) {
     }
 }
 
-// 🔊 फीस जमा होने पर गार्जियन को हिंदी वॉइस नोट भेजना
 async function sendFeeVoiceNote(jid, data) {
     try {
-        const spokenText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि छात्र ${data.name || data.studentName || ''} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। डिजिटल रसीद और विवरण हेतु संदेश देखें। धन्यवाद!`;
+        const spokenText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि छात्र ${data.name || data.studentName || ''} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। डिजिटल रसीद और विवरण हेतु संदेश देखें। धन्यवाद!`;
         const audioBuffer = await generateHindiVoiceNote(spokenText);
 
         if (audioBuffer && sock && isBotReady) {
@@ -659,7 +661,6 @@ async function sendFeeVoiceNote(jid, data) {
     }
 }
 
-// 🛡️ ANTI-BAN SAFE MESSAGE QUEUE ENGINE
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -677,15 +678,17 @@ async function processQueue() {
             if (sock && (isBotReady || sock.user)) {
 
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
-                    const voiceScript = item.voiceText || `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मड़ुई से सूचित किया जाता है कि आपके बच्चे ${item.studentName || ''} की विद्यालय में कुल ${item.totalAmount || 0} रुपये फीस बकाया है। विवरण हेतु संदेश देखें। धन्यवाद!`;
-                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                    // ✅ सिर्फ़ frontend से भेजा पॉलिट voiceText इस्तेमाल हो — कोई hardcoded generic fallback नहीं
+                    const voiceScript = (item.voiceText && item.voiceText.trim().length > 0)
+                        ? item.voiceText
+                        : `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से विनम्र निवेदन है। आपके बच्चे ${item.studentName || ''} की फीस ${item.totalAmount || 0} रुपये अभी बकाया है। कृपया इसे शीघ्र जमा करने का कष्ट करें, ताकि बच्चे की पढ़ाई में कोई दिक्कत न आए। धन्यवाद!`;
 
+                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
                     if (audioBuffer) {
                         await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
                     }
 
                     await sock.sendMessage(jid, { text: item.message });
-
                     await new Promise(res => setTimeout(res, 2000));
 
                     if (item.qrUrl) {
@@ -696,6 +699,7 @@ async function processQueue() {
                     }
 
                     await new Promise(res => setTimeout(res, 1500));
+                    // ✅ अब PDF हर बार पक्का भेजा जाएगा (Structure और Reminder दोनों में)
                     await sendFeeReminderPdf(jid, item);
                 }
                 else if (item.type === 'ADMISSION_CONFIRMATION') {
@@ -747,15 +751,18 @@ app.post('/enqueue-message', (req, res) => {
         type: body.type || 'GENERAL',
         name: body.name || body.student_name || body.studentName || '',
         studentName: body.studentName || body.name || '',
+        // ✅ Class name अब सही Hindi/असली वैल्यू में — safePdfText से strip नहीं होगी
         className: body.className || body.class || '',
         session: body.session || '2026-27',
         rid: body.rid || body.receipt_no || '',
+        scholarNo: body.scholarNo || body.scholar_no || '',
         paid: body.paid || body.amount || 0,
         totalAmount: body.totalAmount || 0,
         voiceText: body.voiceText || '',
         upiLink: body.upiLink || '',
         qrUrl: body.qrUrl || '',
-        details: body.details || ''
+        details: body.details || '',
+        breakdown: Array.isArray(body.breakdown) ? body.breakdown : []
     });
 
     processQueue();
