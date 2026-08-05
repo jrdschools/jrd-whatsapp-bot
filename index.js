@@ -374,7 +374,95 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 📄 SHARED BRANDED PDF BUILDER (analysis.html जैसा टेबल-स्टाइल डिज़ाइन, हर जगह एक जैसा)
+// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (A4 Size)
+async function sendAdmissionOrPromotionPdf(jid, item) {
+    return new Promise((resolve) => {
+        try {
+            const doc = new PDFDocument({ size: 'A4', margin: 30 });
+            let buffers = [];
+
+            doc.on('data', buffers.push.bind(buffers));
+            doc.on('end', async () => {
+                try {
+                    const pdfBuffer = Buffer.concat(buffers);
+                    if (sock && isBotReady) {
+                        const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+                        const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
+                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र (Promotion Certificate)' : 'प्रवेश पत्र (Admission Form)'} PDF।`;
+
+                        await sock.sendMessage(jid, {
+                            document: pdfBuffer,
+                            mimetype: 'application/pdf',
+                            fileName: `${title}_${safePdfText(item.studentName || item.name, 'Student')}.pdf`,
+                            caption: captionText
+                        });
+                    }
+                    resolve();
+                } catch (e) {
+                    console.error('❌ Admission/Promotion PDF Send Error:', e.message);
+                    resolve();
+                }
+            });
+
+            const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+            const mainColor = isPromo ? '#0F766E' : '#1A365D';
+
+            doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).stroke(mainColor);
+            doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).stroke(mainColor);
+
+            doc.rect(25, 25, doc.page.width - 50, 70).fill(mainColor);
+            doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 38, { align: 'center' });
+            doc.fontSize(10).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 25, 65, { align: 'center' });
+
+            doc.fillColor('#000000');
+            doc.rect(25, 105, doc.page.width - 50, 26).fill('#F1F5F9');
+            doc.fillColor(mainColor).fontSize(12).font('Helvetica-Bold').text(
+                isPromo ? 'OFFICIAL CLASS PROMOTION CERTIFICATE (2026-27)' : 'OFFICIAL ADMISSION CONFIRMATION SLIP (2026-27)',
+                25, 112, { align: 'center' }
+            );
+
+            const gridTop = 145;
+            doc.rect(25, gridTop, doc.page.width - 50, 180).lineWidth(0.5).stroke('#CBD5E1');
+
+            let rowY = gridTop + 15;
+            const drawRow = (label, value, isBoldVal = false) => {
+                doc.font('Helvetica-Bold').fillColor('#475569').text(label, 40, rowY);
+                doc.font(isBoldVal ? 'Helvetica-Bold' : 'Helvetica').fillColor(isBoldVal ? mainColor : '#0F172A').text(String(value || 'N/A'), 200, rowY);
+                doc.moveTo(25, rowY + 18).lineTo(doc.page.width - 25, rowY + 18).stroke('#E2E8F0');
+                rowY += 26;
+            };
+
+            drawRow('Student Name (छात्र का नाम) :', item.studentName || item.name, true);
+            drawRow("Father's Name (पिता का नाम) :", item.fatherName || item.father);
+            drawRow('Scholar / Enrollment No :', item.scholarNo || item.scholar_no || item.enroll);
+            drawRow(isPromo ? 'Promoted Class (नयी कक्षा) :' : 'Allocated Class (प्रवेश कक्षा) :', item.className || item.class, true);
+            drawRow('Student Category / Type :', item.studentType || 'REGULAR');
+            drawRow('Confirmation Date (तिथि) :', item.admissionDate || new Date().toLocaleDateString('en-IN'));
+
+            const footerY = doc.page.height - 130;
+            doc.rect(25, footerY, doc.page.width - 50, 45).fill('#F8FAFC');
+            doc.fillColor('#334155').fontSize(9.5).font('Helvetica-Oblique').text(
+                isPromo 
+                ? 'Hearty congratulations from J.R.D. Management on your promotion to the next academic grade! Keep learning and growing.'
+                : 'Welcome to the J.R.D. Public School family! We wish the student a bright and successful academic journey ahead.',
+                35, footerY + 10, { width: doc.page.width - 70, align: 'center' }
+            );
+
+            const sigY = doc.page.height - 65;
+            doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
+            doc.text('Parent / Guardian Signature', 50, sigY);
+            doc.text('Admission In-Charge', 240, sigY);
+            doc.text('Principal / Seal', doc.page.width - 150, sigY);
+
+            doc.end();
+        } catch (err) {
+            console.error('❌ Admission/Promotion PDF Build Error:', err.message);
+            resolve();
+        }
+    });
+}
+
+// 📄 SHARED BRANDED PDF BUILDER (FOR FEE STATEMENTS)
 function buildBrandedFeePdfDoc(doc, data, opts) {
     const headerColor = opts.headerColor || '#1A365D';
     const bandLabel = opts.bandLabel || 'OFFICIAL FEE STATEMENT';
@@ -398,7 +486,6 @@ function buildBrandedFeePdfDoc(doc, data, opts) {
     doc.font('Helvetica').text(`${safePdfText(data.name || data.studentName, 'STUDENT')}`, 100, metaTop + 8);
 
     doc.font('Helvetica-Bold').text(`Class & Sec  : `, 28, metaTop + 25);
-    // ✅ Class name अब हिंदी/असली वैल्यू में जाएगी (safePdfText अब सिर्फ non-ASCII strip नहीं करता)
     doc.font('Helvetica').text(`${data.className || 'N/A'}`, 100, metaTop + 25);
 
     doc.font('Helvetica-Bold').text(`Enrolment    : `, 28, metaTop + 42);
@@ -415,7 +502,6 @@ function buildBrandedFeePdfDoc(doc, data, opts) {
     const todayDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
     doc.font('Helvetica').text(`${todayDate}`, rightX + 45, metaTop + 42);
 
-    // 📊 Breakdown Table (analysis.html वाले brkPrintTable जैसा head/demand/received/status)
     const tableTop = 188;
     doc.rect(20, tableTop, doc.page.width - 40, 18).fill('#F1F5F9');
     doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
@@ -505,7 +591,7 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 📄 BRANDED OFFICIAL FEE REMINDER / STRUCTURE NOTICE PDF (analysis.html जैसा)
+// 📄 BRANDED OFFICIAL FEE REMINDER / STRUCTURE NOTICE PDF
 async function sendFeeReminderPdf(jid, data) {
     return new Promise((resolve) => {
         try {
@@ -549,7 +635,7 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 
-// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS — पूरा टेक्स्ट, sentence कटता नहीं)
+// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS)
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
@@ -560,7 +646,6 @@ async function generateHindiVoiceNote(text) {
         await tts.setMetadata(HINDI_FEMALE_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
         const { audioStream } = await tts.toStream(text);
 
-        // ✅ पूरा stream data collect करो — sentence-by-sentence कटने से रोकने के लिए
         const chunks = [];
         await new Promise((resolve, reject) => {
             audioStream.on('data', (chunk) => chunks.push(chunk));
@@ -677,8 +762,8 @@ async function processQueue() {
 
             if (sock && (isBotReady || sock.user)) {
 
+                // 🎯 A. FEE REMINDER & STRUCTURE COMBO
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
-                    // ✅ सिर्फ़ frontend से भेजा पॉलिट voiceText इस्तेमाल हो — कोई hardcoded generic fallback नहीं
                     const voiceScript = (item.voiceText && item.voiceText.trim().length > 0)
                         ? item.voiceText
                         : `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से विनम्र निवेदन है। आपके बच्चे ${item.studentName || ''} की फीस ${item.totalAmount || 0} रुपये अभी बकाया है। कृपया इसे शीघ्र जमा करने का कष्ट करें, ताकि बच्चे की पढ़ाई में कोई दिक्कत न आए। धन्यवाद!`;
@@ -699,12 +784,30 @@ async function processQueue() {
                     }
 
                     await new Promise(res => setTimeout(res, 1500));
-                    // ✅ अब PDF हर बार पक्का भेजा जाएगा (Structure और Reminder दोनों में)
                     await sendFeeReminderPdf(jid, item);
                 }
-                else if (item.type === 'ADMISSION_CONFIRMATION') {
+
+                // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
+                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION') {
+                    const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+                    const defaultVoice = isPromo
+                        ? `नमस्कार! बधाई हो, आपके बच्चे ${item.studentName || ''} को जे आर डी पब्लिक स्कूल मरुई में अगली कक्षा ${item.className || ''} में सफलतापूर्वक प्रमोट कर दिया गया है। नए सत्र के लिए ढेर सारी शुभकामनाएँ!`
+                        : `नमस्कार! जे आर डी पब्लिक स्कूल मरुई परिवार में आपके बच्चे ${item.studentName || ''} का हार्दिक स्वागत है। आपके बच्चे का नया प्रवेश सफलतापूर्वक पूर्ण हो चुका है। धन्यवाद!`;
+
+                    const voiceScript = (item.voiceText && item.voiceText.trim().length > 0) ? item.voiceText : defaultVoice;
+                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+
+                    if (audioBuffer) {
+                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                    }
+
                     await sock.sendMessage(jid, { text: item.message });
+                    await new Promise(res => setTimeout(res, 2000));
+
+                    await sendAdmissionOrPromotionPdf(jid, item);
                 }
+
+                // 🎯 C. GENERAL / RECEIPT MESSAGES
                 else {
                     let cleanDet = (item.details || '').replace(/<br>/g, "\n");
                     let textToSend = item.message;
@@ -751,11 +854,13 @@ app.post('/enqueue-message', (req, res) => {
         type: body.type || 'GENERAL',
         name: body.name || body.student_name || body.studentName || '',
         studentName: body.studentName || body.name || '',
-        // ✅ Class name अब सही Hindi/असली वैल्यू में — safePdfText से strip नहीं होगी
         className: body.className || body.class || '',
         session: body.session || '2026-27',
         rid: body.rid || body.receipt_no || '',
-        scholarNo: body.scholarNo || body.scholar_no || '',
+        scholarNo: body.scholarNo || body.scholar_no || body.enroll || '',
+        fatherName: body.fatherName || body.father || '',
+        admissionDate: body.admissionDate || body.admission_date || '',
+        studentType: body.studentType || body.student_type || body.status || 'REGULAR',
         paid: body.paid || body.amount || 0,
         totalAmount: body.totalAmount || 0,
         voiceText: body.voiceText || '',
