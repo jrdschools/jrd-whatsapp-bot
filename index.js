@@ -386,7 +386,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 try {
                     const pdfBuffer = Buffer.concat(buffers);
                     if (sock && isBotReady) {
-                        const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+                        const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
                         const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
                         const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र (Promotion Certificate)' : 'प्रवेश पत्र (Admission Form)'} PDF।`;
 
@@ -404,7 +404,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 }
             });
 
-            const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+            const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
             const mainColor = isPromo ? '#0F766E' : '#1A365D';
 
             doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).stroke(mainColor);
@@ -788,11 +788,11 @@ async function processQueue() {
                 }
 
                 // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
-                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION') {
-                    const isPromo = item.type === 'PROMOTION_CONFIRMATION';
+                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
+                    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
                     const defaultVoice = isPromo
-                        ? `नमस्कार! बधाई हो, आपके बच्चे ${item.studentName || ''} को जे आर डी पब्लिक स्कूल मरुई में अगली कक्षा ${item.className || ''} में सफलतापूर्वक प्रमोट कर दिया गया है। नए सत्र के लिए ढेर सारी शुभकामनाएँ!`
-                        : `नमस्कार! जे आर डी पब्लिक स्कूल मरुई परिवार में आपके बच्चे ${item.studentName || ''} का हार्दिक स्वागत है। आपके बच्चे का नया प्रवेश सफलतापूर्वक पूर्ण हो चुका है। धन्यवाद!`;
+                        ? `नमस्कार! बधाई हो, आपके बच्चे ${item.studentName || item.name || ''} को जे आर डी पब्लिक स्कूल मरुई में अगली कक्षा ${item.className || item.class || ''} में सफलतापूर्वक प्रमोट कर दिया गया है। नए सत्र के लिए ढेर सारी शुभकामनाएँ!`
+                        : `नमस्कार! जे आर डी पब्लिक स्कूल मरुई परिवार में आपके बच्चे ${item.studentName || item.name || ''} का हार्दिक स्वागत है। आपके बच्चे का नया प्रवेश सफलतापूर्वक पूर्ण हो चुका है। नए सत्र की शुभकामनाएँ!`;
 
                     const voiceScript = (item.voiceText && item.voiceText.trim().length > 0) ? item.voiceText : defaultVoice;
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
@@ -801,19 +801,24 @@ async function processQueue() {
                         await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
                     }
 
-                    await sock.sendMessage(jid, { text: item.message });
-                    await new Promise(res => setTimeout(res, 2000));
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                        await new Promise(res => setTimeout(res, 2000));
+                    }
 
-                    await sendAdmissionOrPromotionPdf(jid, item);
+                    // केवल तभी PDF भेजेगा जब विद्यार्थी का नाम उपलब्ध हो
+                    if (item.studentName || item.name) {
+                        await sendAdmissionOrPromotionPdf(jid, item);
+                    }
                 }
 
-                // 🎯 C. GENERAL / RECEIPT MESSAGES
-                else {
+                // 🎯 C. FEE PAYMENT RECEIPT (केवल तभी चलेगा जब वास्तव में भुगतान हुआ हो)
+                else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
                     let cleanDet = (item.details || '').replace(/<br>/g, "\n");
                     let textToSend = item.message;
 
                     if (!textToSend || textToSend.trim() === '') {
-                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || 'N/A'}\n🏫 *कक्षा:* ${item.className || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || item.studentName || 'N/A'}\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
                     }
 
                     await sock.sendMessage(jid, { text: textToSend });
@@ -821,6 +826,19 @@ async function processQueue() {
                     await sendFeePdfReceipt(jid, item);
                     await new Promise(res => setTimeout(res, 1500));
                     await sendFeeVoiceNote(jid, item);
+                }
+
+                // 🎯 D. GENERAL TEXT MESSAGES (बिना किसी ऑटो फीस रसीद या वॉइस के)
+                else {
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                    }
+                    if (item.voiceText && item.voiceText.trim().length > 0) {
+                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+                        if (audioBuffer) {
+                            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                        }
+                    }
                 }
 
                 messageQueue.shift();
@@ -851,11 +869,12 @@ app.post('/enqueue-message', (req, res) => {
     messageQueue.push({
         number: targetPhone.toString(),
         message: body.message || "",
-        type: body.type || 'GENERAL',
+        type: body.type || body.action || 'GENERAL',
+        action: body.action || body.type || '',
         name: body.name || body.student_name || body.studentName || '',
-        studentName: body.studentName || body.name || '',
+        studentName: body.studentName || body.name || body.student_name || '',
         className: body.className || body.class || '',
-        session: body.session || '2026-27',
+        session: body.session || body.session_year || '2026-27',
         rid: body.rid || body.receipt_no || '',
         scholarNo: body.scholarNo || body.scholar_no || body.enroll || '',
         fatherName: body.fatherName || body.father || '',
