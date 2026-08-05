@@ -839,11 +839,36 @@ async function processQueue() {
                 // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
                 else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
                     const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-                    const defaultVoice = isPromo
-                        ? `नमस्कार! बधाई हो, आपके बच्चे ${item.studentName || item.name || ''} को जे आर डी पब्लिक स्कूल मरुई में अगली कक्षा ${item.className || item.class || ''} में सफलतापूर्वक प्रमोट कर दिया गया है। नए सत्र के लिए ढेर सारी शुभकामनाएँ!`
-                        : `नमस्कार! जे आर डी पब्लिक स्कूल मरुई परिवार में आपके बच्चे ${item.studentName || item.name || ''} का हार्दिक स्वागत है। आपके बच्चे का नया प्रवेश सफलतापूर्वक पूर्ण हो चुका है। नए सत्र की शुभकामनाएँ!`;
+                    
+                    // 💰 1. Z-Engine फ़ीस स्ट्रक्चर और ग्रैंड टोटल की गणना
+                    const fs = item.feeStructure || {};
+                    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || 0;
 
-                    const voiceScript = (item.voiceText && item.voiceText.trim().length > 0) ? item.voiceText : defaultVoice;
+                    let voiceFeeList = [];
+                    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
+                    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+
+                    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ₹${mTotal}`);
+                    if (fs.admission_fee > 0) voiceFeeList.push(`प्रवेश शुल्क ₹${fs.admission_fee}`);
+                    if (fs.registration_fee > 0) voiceFeeList.push(`पंजीकरण शुल्क ₹${fs.registration_fee}`);
+                    if (fs.class_change_fee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ₹${fs.class_change_fee}`);
+                    if (fs.half_yearly_exam_fee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ₹${fs.half_yearly_exam_fee}`);
+                    if (fs.annual_exam_fee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ₹${fs.annual_exam_fee}`);
+
+                    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
+
+                    // 🎙️ 2. डिफ़ॉल्ट वॉइस स्क्रिप्ट (फ़ीस ब्रेकडाउन + ग्रैंड टोटल के साथ)
+                    const defaultVoice = isPromo
+                        ? `नमस्कार! जे.आर.डी. पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${item.studentName || item.name || ''} को अगली कक्षा ${item.className || item.class || ''} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा। नये सत्र के लिए हार्दिक शुभकामनाएँ!`
+                        : `नमस्कार! जे.आर.डी. पब्लिक स्कूल मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${item.studentName || item.name || ''} का कक्षा ${item.className || item.class || ''} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा। नये सत्र के लिए ढेरों शुभकामनाएँ!`;
+
+                    let voiceScript = (item.voiceText && item.voiceText.trim().length > 0) ? item.voiceText : defaultVoice;
+
+                    // 🚀 3. सेफ़्टी गार्ड: अगर बाहर से आए voiceText में ग्रैंड टोटल छूट गया हो, तो खुद ही अंत में जोड़ दे
+                    if (grandTotal > 0 && !voiceScript.includes("कुल") && !voiceScript.includes("वार्षिक शुल्क")) {
+                        voiceScript += ` पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा।`;
+                    }
+
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
 
                     if (audioBuffer) {
@@ -855,7 +880,7 @@ async function processQueue() {
                         await new Promise(res => setTimeout(res, 2000));
                     }
 
-                    // केवल तभी PDF भेजेगा जब विद्यार्थी का नाम उपलब्ध हो
+                    // 📄 4. A4 PDF भेजना
                     if (item.studentName || item.name) {
                         await sendAdmissionOrPromotionPdf(jid, item);
                     }
@@ -906,7 +931,6 @@ async function processQueue() {
 
     isProcessingQueue = false;
 }
-
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
