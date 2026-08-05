@@ -374,7 +374,7 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (A4 Size)
+// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (A4 Size with Full Fee Breakdown)
 async function sendAdmissionOrPromotionPdf(jid, item) {
     return new Promise((resolve) => {
         try {
@@ -388,7 +388,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                     if (sock && isBotReady) {
                         const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
                         const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
-                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र (Promotion Certificate)' : 'प्रवेश पत्र (Admission Form)'} PDF।`;
+                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र एवं फ़ीस विवरण (Promotion Letter)' : 'प्रवेश पत्र एवं फ़ीस विवरण (Admission Form)'} PDF।`;
 
                         await sock.sendMessage(jid, {
                             document: pdfBuffer,
@@ -407,52 +407,102 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
             const mainColor = isPromo ? '#0F766E' : '#1A365D';
 
+            // बाहरी डबल बॉर्डर
             doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).stroke(mainColor);
             doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).stroke(mainColor);
 
-            doc.rect(25, 25, doc.page.width - 50, 70).fill(mainColor);
-            doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 38, { align: 'center' });
-            doc.fontSize(10).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 25, 65, { align: 'center' });
+            // हेडर
+            doc.rect(25, 25, doc.page.width - 50, 60).fill(mainColor);
+            doc.fillColor('#FFFFFF').fontSize(20).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 35, { align: 'center' });
+            doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 25, 60, { align: 'center' });
 
+            // टाइटल बैंड
             doc.fillColor('#000000');
-            doc.rect(25, 105, doc.page.width - 50, 26).fill('#F1F5F9');
-            doc.fillColor(mainColor).fontSize(12).font('Helvetica-Bold').text(
+            doc.rect(25, 95, doc.page.width - 50, 24).fill('#F1F5F9');
+            doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text(
                 isPromo ? 'OFFICIAL CLASS PROMOTION CERTIFICATE (2026-27)' : 'OFFICIAL ADMISSION CONFIRMATION SLIP (2026-27)',
-                25, 112, { align: 'center' }
+                25, 102, { align: 'center' }
             );
 
-            const gridTop = 145;
-            doc.rect(25, gridTop, doc.page.width - 50, 180).lineWidth(0.5).stroke('#CBD5E1');
+            // छात्र विवरण ग्रिड
+            const gridTop = 130;
+            doc.rect(25, gridTop, doc.page.width - 50, 150).lineWidth(0.5).stroke('#CBD5E1');
 
-            let rowY = gridTop + 15;
+            let rowY = gridTop + 10;
             const drawRow = (label, value, isBoldVal = false) => {
-                doc.font('Helvetica-Bold').fillColor('#475569').text(label, 40, rowY);
-                doc.font(isBoldVal ? 'Helvetica-Bold' : 'Helvetica').fillColor(isBoldVal ? mainColor : '#0F172A').text(String(value || 'N/A'), 200, rowY);
-                doc.moveTo(25, rowY + 18).lineTo(doc.page.width - 25, rowY + 18).stroke('#E2E8F0');
-                rowY += 26;
+                doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#475569').text(label, 35, rowY);
+                doc.font(isBoldVal ? 'Helvetica-Bold' : 'Helvetica').fontSize(9.5).fillColor(isBoldVal ? mainColor : '#0F172A').text(String(value || 'N/A'), 220, rowY);
+                doc.moveTo(25, rowY + 16).lineTo(doc.page.width - 25, rowY + 16).stroke('#E2E8F0');
+                rowY += 22;
             };
 
             drawRow('Student Name (छात्र का नाम) :', item.studentName || item.name, true);
             drawRow("Father's Name (पिता का नाम) :", item.fatherName || item.father);
+            drawRow('Mother\'s Name (माता का नाम) :', item.motherName || item.mother);
             drawRow('Scholar / Enrollment No :', item.scholarNo || item.scholar_no || item.enroll);
-            drawRow(isPromo ? 'Promoted Class (नयी कक्षा) :' : 'Allocated Class (प्रवेश कक्षा) :', item.className || item.class, true);
-            drawRow('Student Category / Type :', item.studentType || 'REGULAR');
-            drawRow('Confirmation Date (तिथि) :', item.admissionDate || new Date().toLocaleDateString('en-IN'));
+            drawRow(isPromo ? 'Promoted Class (प्रमोटेड कक्षा) :' : 'Allocated Class (प्रवेश कक्षा) :', item.className || item.class, true);
+            drawRow('Category / Student Type :', item.studentType || (isPromo ? 'OLD' : 'NEW'));
 
-            const footerY = doc.page.height - 130;
-            doc.rect(25, footerY, doc.page.width - 50, 45).fill('#F8FAFC');
-            doc.fillColor('#334155').fontSize(9.5).font('Helvetica-Oblique').text(
+            // 💰 स्वीकृत Z-Engine फ़ीस विवरण टेबल (Fee Breakdown Table)
+            const feeTop = gridTop + 165;
+            doc.rect(25, feeTop, doc.page.width - 50, 20).fill(mainColor);
+            doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold').text('APPROVED FEE BREAKDOWN (स्वीकृत सत्र शुल्क विवरण)', 35, feeTop + 5);
+
+            let feeY = feeTop + 25;
+            doc.rect(25, feeY, doc.page.width - 50, 18).fill('#F1F5F9');
+            doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
+            doc.text('Fee Component (शुल्क प्रकार)', 35, feeY + 4);
+            doc.text('Amount (स्वीकृत राशि)', doc.page.width - 150, feeY + 4, { align: 'right' });
+            feeY += 20;
+
+            let totalFeeSum = 0;
+            const addFeeRow = (label, amt) => {
+                if (!amt || parseFloat(amt) <= 0) return;
+                let numAmt = parseFloat(amt);
+                totalFeeSum += numAmt;
+                doc.font('Helvetica').fontSize(9).fillColor('#334155').text(label, 35, feeY);
+                doc.font('Helvetica-Bold').fontSize(9).fillColor('#0F172A').text(`Rs. ${numAmt}/-`, doc.page.width - 150, feeY, { align: 'right' });
+                doc.moveTo(25, feeY + 14).lineTo(doc.page.width - 25, feeY + 14).stroke('#E2E8F0');
+                feeY += 18;
+            };
+
+            // फ़ीस की मदें जोड़ना
+            let fs = item.feeStructure || item;
+            let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
+            let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+
+            if (mTotal > 0) addFeeRow(`Tuition Fee (मासिक शिक्षण शुल्क: Rs.${mSingle} × 12 माह)`, mTotal);
+            addFeeRow('Admission Fee (प्रवेश शुल्क)', fs.admission_fee || item.admission_fee);
+            addFeeRow('Registration Fee (पंजीकरण शुल्क)', fs.registration_fee || item.registration_fee);
+            addFeeRow('Class Change Fee (कक्षा परिवर्तन शुल्क)', fs.class_change_fee || item.class_change_fee);
+            addFeeRow('Half Yearly Exam Fee (छमाही परीक्षा शुल्क)', fs.half_yearly_exam_fee || item.half_yearly_exam_fee);
+            addFeeRow('Annual Exam Fee (वार्षिक परीक्षा शुल्क)', fs.annual_exam_fee || item.annual_exam_fee);
+            addFeeRow('Practical Fee (प्रैक्टिकल परीक्षा शुल्क)', fs.practical_fee || item.practical_fee);
+            addFeeRow('Board Exam Fee (बोर्ड परीक्षा शुल्क)', fs.board_fee || item.board_fee);
+            addFeeRow('Admit Card Fee (एडमिट कार्ड शुल्क)', fs.admit_card_fee || item.admit_card_fee);
+
+            // कुल स्वीकृत योग रो (Grand Total Row)
+            let grandTotalAmt = parseFloat(fs.grand_total || item.totalAmount || totalFeeSum || 0);
+            doc.rect(25, feeY, doc.page.width - 50, 22).fill('#E0E7FF');
+            doc.fillColor(mainColor).fontSize(10).font('Helvetica-Bold');
+            doc.text('TOTAL APPROVED ANNUAL FEE (स्वीकृत कुल वार्षिक योग):', 35, feeY + 6);
+            doc.text(`Rs. ${grandTotalAmt}/-`, doc.page.width - 150, feeY + 6, { align: 'right' });
+
+            // फुटर एवं सिग्नेचर
+            const footerY = doc.page.height - 110;
+            doc.rect(25, footerY, doc.page.width - 50, 35).fill('#F8FAFC');
+            doc.fillColor('#334155').fontSize(8.5).font('Helvetica-Oblique').text(
                 isPromo 
-                ? 'Hearty congratulations from J.R.D. Management on your promotion to the next academic grade! Keep learning and growing.'
-                : 'Welcome to the J.R.D. Public School family! We wish the student a bright and successful academic journey ahead.',
-                35, footerY + 10, { width: doc.page.width - 70, align: 'center' }
+                ? 'Hearty congratulations on your promotion! Please adhere to the approved fee structure for the new session.'
+                : 'Welcome to J.R.D. Public School family! Please adhere to the approved fee structure for the session.',
+                35, footerY + 8, { width: doc.page.width - 70, align: 'center' }
             );
 
-            const sigY = doc.page.height - 65;
-            doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
-            doc.text('Parent / Guardian Signature', 50, sigY);
+            const sigY = doc.page.height - 55;
+            doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
+            doc.text('Parent / Guardian Signature', 40, sigY);
             doc.text('Admission In-Charge', 240, sigY);
-            doc.text('Principal / Seal', doc.page.width - 150, sigY);
+            doc.text('Principal / Seal', doc.page.width - 140, sigY);
 
             doc.end();
         } catch (err) {
@@ -461,7 +511,6 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
         }
     });
 }
-
 // 📄 SHARED BRANDED PDF BUILDER (FOR FEE STATEMENTS)
 function buildBrandedFeePdfDoc(doc, data, opts) {
     const headerColor = opts.headerColor || '#1A365D';
@@ -866,22 +915,30 @@ app.post('/enqueue-message', (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
     }
 
+    // 🎯 सुरक्षित नेस्टेड पेलोड मैपिंग (बिना किसी पुराने फ़ील्ड को हटाए)
+    const stData = body.studentData || {};
+    const fStruct = body.feeStructure || {};
+
     messageQueue.push({
         number: targetPhone.toString(),
         message: body.message || "",
         type: body.type || body.action || 'GENERAL',
         action: body.action || body.type || '',
-        name: body.name || body.student_name || body.studentName || '',
-        studentName: body.studentName || body.name || body.student_name || '',
-        className: body.className || body.class || '',
-        session: body.session || body.session_year || '2026-27',
+        name: body.name || body.student_name || body.studentName || stData.name || '',
+        studentName: body.studentName || body.name || body.student_name || stData.name || '',
+        className: body.className || body.class || stData.class || '',
+        fromClass: body.fromClass || body.from_class || stData.from_class || '',
+        session: body.session || body.session_year || stData.session_year || '2026-27',
         rid: body.rid || body.receipt_no || '',
-        scholarNo: body.scholarNo || body.scholar_no || body.enroll || '',
-        fatherName: body.fatherName || body.father || '',
+        scholarNo: body.scholarNo || body.scholar_no || body.enroll || stData.scholar_no || stData.enroll || '',
+        enroll: body.enroll || stData.enroll || body.scholarNo || '',
+        fatherName: body.fatherName || body.father || stData.father || '',
+        motherName: body.motherName || body.mother || stData.mother || '',
         admissionDate: body.admissionDate || body.admission_date || '',
-        studentType: body.studentType || body.student_type || body.status || 'REGULAR',
+        studentType: body.studentType || body.student_type || body.status || stData.type || 'REGULAR',
         paid: body.paid || body.amount || 0,
-        totalAmount: body.totalAmount || 0,
+        totalAmount: body.totalAmount || fStruct.grand_total || fStruct.total_amount || 0,
+        feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body, // 🎯 Z-Engine फीस ऑब्जेक्ट
         voiceText: body.voiceText || '',
         upiLink: body.upiLink || '',
         qrUrl: body.qrUrl || '',
@@ -913,7 +970,6 @@ app.post('/send-whatsapp', async (req, res) => {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
-
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP बोट व्हाट्सएप से कनेक्टेड है!</h2>');
