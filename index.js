@@ -374,7 +374,7 @@ async function sendStudentProfileCard(jid, s) {
     await sendReply(jid, replyMsg);
 }
 
-// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (A4 Size with Full Fee Breakdown)
+// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (A4 Size Engine - FIX)
 async function sendAdmissionOrPromotionPdf(jid, item) {
     return new Promise((resolve) => {
         try {
@@ -385,17 +385,24 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             doc.on('end', async () => {
                 try {
                     const pdfBuffer = Buffer.concat(buffers);
-                    if (sock && isBotReady) {
-                        const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-                        const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
-                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र एवं फ़ीस विवरण (Promotion Letter)' : 'प्रवेश पत्र एवं फ़ीस विवरण (Admission Form)'} PDF।`;
+                    
+                    // 🎯 1. एक्शन/टाइप के आधार पर प्रमोशन की जांच (Strict Check)
+                    const actionType = String(item.type || item.action || '').toUpperCase();
+                    const isPromo = actionType.includes('PROMOT') || item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
+                    
+                    const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
+                    const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र एवं फ़ीस विवरण (Promotion Letter)' : 'प्रवेश पत्र एवं फ़ीस विवरण (Admission Form)'} PDF।`;
 
+                    if (sock) {
                         await sock.sendMessage(jid, {
                             document: pdfBuffer,
                             mimetype: 'application/pdf',
                             fileName: `${title}_${safePdfText(item.studentName || item.name, 'Student')}.pdf`,
                             caption: captionText
                         });
+                        console.log(`✅ ${isPromo ? 'प्रमोशन' : 'एडमिशन'} PDF व्हाट्सएप पर सफलतापूर्वक भेज दी गई!`);
+                    } else {
+                        console.error('🛑 WhatsApp Socket उपलब्ध नहीं है, PDF नहीं भेजी जा सकी!');
                     }
                     resolve();
                 } catch (e) {
@@ -404,7 +411,9 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 }
             });
 
-            const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
+            // 🎯 2. PDF डिज़ाइन कलर्स एवं हेडर
+            const actionType = String(item.type || item.action || '').toUpperCase();
+            const isPromo = actionType.includes('PROMOT') || item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
             const mainColor = isPromo ? '#0F766E' : '#1A365D';
 
             // बाहरी डबल बॉर्डर
@@ -416,7 +425,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             doc.fillColor('#FFFFFF').fontSize(20).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 35, { align: 'center' });
             doc.fontSize(9).font('Helvetica').text('Marui, Varanasi (U.P.) - 221208 | UDISE: 09670804504', 25, 60, { align: 'center' });
 
-            // टाइटल बैंड
+            // टाइटल बैज
             doc.fillColor('#000000');
             doc.rect(25, 95, doc.page.width - 50, 24).fill('#F1F5F9');
             doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text(
@@ -436,14 +445,18 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 rowY += 22;
             };
 
+            const classDisplayVal = (isPromo && item.fromClass) 
+                ? `${item.fromClass} ➔ ${item.className || item.class}` 
+                : (item.className || item.class || 'N/A');
+
             drawRow('Student Name (छात्र का नाम) :', item.studentName || item.name, true);
             drawRow("Father's Name (पिता का नाम) :", item.fatherName || item.father);
-            drawRow('Mother\'s Name (माता का नाम) :', item.motherName || item.mother);
+            drawRow("Mother's Name (माता का नाम) :", item.motherName || item.mother);
             drawRow('Scholar / Enrollment No :', item.scholarNo || item.scholar_no || item.enroll);
-            drawRow(isPromo ? 'Promoted Class (प्रमोटेड कक्षा) :' : 'Allocated Class (प्रवेश कक्षा) :', item.className || item.class, true);
+            drawRow(isPromo ? 'Promoted Class (प्रमोटेड कक्षा) :' : 'Allocated Class (प्रवेश कक्षा) :', classDisplayVal, true);
             drawRow('Category / Student Type :', item.studentType || (isPromo ? 'OLD' : 'NEW'));
 
-            // 💰 स्वीकृत Z-Engine फ़ीस विवरण टेबल (Fee Breakdown Table)
+            // 💰 स्वीकृत Z-Engine फ़ीस विवरण टेबल
             const feeTop = gridTop + 165;
             doc.rect(25, feeTop, doc.page.width - 50, 20).fill(mainColor);
             doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold').text('APPROVED FEE BREAKDOWN (स्वीकृत सत्र शुल्क विवरण)', 35, feeTop + 5);
@@ -467,7 +480,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             };
 
             // फ़ीस की मदें जोड़ना
-            let fs = item.feeStructure || item;
+            let fs = item.feeStructure || {};
             let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
             let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
 
@@ -481,7 +494,7 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             addFeeRow('Board Exam Fee (बोर्ड परीक्षा शुल्क)', fs.board_fee || item.board_fee);
             addFeeRow('Admit Card Fee (एडमिट कार्ड शुल्क)', fs.admit_card_fee || item.admit_card_fee);
 
-            // कुल स्वीकृत योग रो (Grand Total Row)
+            // कुल स्वीकृत योग (Grand Total)
             let grandTotalAmt = parseFloat(fs.grand_total || item.totalAmount || totalFeeSum || 0);
             doc.rect(25, feeY, doc.page.width - 50, 22).fill('#E0E7FF');
             doc.fillColor(mainColor).fontSize(10).font('Helvetica-Bold');
@@ -836,55 +849,70 @@ async function processQueue() {
                     await sendFeeReminderPdf(jid, item);
                 }
 
-                // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
-                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
-                    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-                    
-                    // 💰 1. Z-Engine फ़ीस स्ट्रक्चर और ग्रैंड टोटल की गणना
-                    const fs = item.feeStructure || {};
-                    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || 0;
+              // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
+else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
+    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
+    
+    // 💰 1. Z-Engine फ़ीस स्ट्रक्चर और ग्रैंड टोटल की सटीक गणना
+    const fs = item.feeStructure || {};
+    
+    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
+    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+    let admFee = parseFloat(fs.admission_fee || item.admission_fee || 0);
+    let regFee = parseFloat(fs.registration_fee || item.registration_fee || 0);
+    let chgFee = parseFloat(fs.class_change_fee || item.class_change_fee || 0);
+    let halfFee = parseFloat(fs.half_yearly_exam_fee || item.half_yearly_exam_fee || 0);
+    let annuFee = parseFloat(fs.annual_exam_fee || item.annual_exam_fee || 0);
+    let pracFee = parseFloat(fs.practical_fee || item.practical_fee || 0);
+    let boardFee = parseFloat(fs.board_fee || item.board_fee || 0);
+    let admitFee = parseFloat(fs.admit_card_fee || item.admit_card_fee || 0);
 
-                    let voiceFeeList = [];
-                    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
-                    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+    let calculatedGrandTotal = mTotal + admFee + regFee + chgFee + halfFee + annuFee + pracFee + boardFee + admitFee;
+    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || calculatedGrandTotal || 0;
 
-                    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ₹${mTotal}`);
-                    if (fs.admission_fee > 0) voiceFeeList.push(`प्रवेश शुल्क ₹${fs.admission_fee}`);
-                    if (fs.registration_fee > 0) voiceFeeList.push(`पंजीकरण शुल्क ₹${fs.registration_fee}`);
-                    if (fs.class_change_fee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ₹${fs.class_change_fee}`);
-                    if (fs.half_yearly_exam_fee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ₹${fs.half_yearly_exam_fee}`);
-                    if (fs.annual_exam_fee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ₹${fs.annual_exam_fee}`);
+    let voiceFeeList = [];
+    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ${mTotal} रुपये`);
+    if (admFee > 0) voiceFeeList.push(`प्रवेश शुल्क ${admFee} रुपये`);
+    if (regFee > 0) voiceFeeList.push(`पंजीकरण शुल्क ${regFee} रुपये`);
+    if (chgFee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ${chgFee} रुपये`);
+    if (halfFee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ${halfFee} रुपये`);
+    if (annuFee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ${annuFee} रुपये`);
+    if (pracFee > 0) voiceFeeList.push(`प्रैक्टिकल फीस ${pracFee} रुपये`);
+    if (boardFee > 0) voiceFeeList.push(`बोर्ड परीक्षा शुल्क ${boardFee} रुपये`);
+    if (admitFee > 0) voiceFeeList.push(`एडमिट कार्ड शुल्क ${admitFee} रुपये`);
 
-                    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
+    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
 
-                    // 🎙️ 2. डिफ़ॉल्ट वॉइस स्क्रिप्ट (फ़ीस ब्रेकडाउन + ग्रैंड टोटल के साथ)
-                    const defaultVoice = isPromo
-                        ? `नमस्कार! जे.आर.डी. पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${item.studentName || item.name || ''} को अगली कक्षा ${item.className || item.class || ''} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा। नये सत्र के लिए हार्दिक शुभकामनाएँ!`
-                        : `नमस्कार! जे.आर.डी. पब्लिक स्कूल मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${item.studentName || item.name || ''} का कक्षा ${item.className || item.class || ''} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा। नये सत्र के लिए ढेरों शुभकामनाएँ!`;
+    // 🎙️ 2. गारंटेड वॉइस स्क्रिप्ट (हर हाल में ब्रेकडाउन + अंत में ग्रैंड टोटल बोलेगा)
+    let voiceScript = "";
+    const sName = item.studentName || item.name || 'छात्र';
+    const cName = item.className || item.class || '-';
 
-                    let voiceScript = (item.voiceText && item.voiceText.trim().length > 0) ? item.voiceText : defaultVoice;
+    if (isPromo) {
+        voiceScript = `नमस्कार! जे आर डी पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${sName} को अगली कक्षा ${cName} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की हार्दिक शुभकामनाएँ!`;
+    } else {
+        voiceScript = `नमस्कार! जे आर डी PUBLIC SCHOOL मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${sName} का कक्षा ${cName} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की ढेरों शुभकामनाएँ!`;
+    }
 
-                    // 🚀 3. सेफ़्टी गार्ड: अगर बाहर से आए voiceText में ग्रैंड टोटल छूट गया हो, तो खुद ही अंत में जोड़ दे
-                    if (grandTotal > 0 && !voiceScript.includes("कुल") && !voiceScript.includes("वार्षिक शुल्क")) {
-                        voiceScript += ` पूरे शैक्षणिक सत्र में स्वीकृत कुल वार्षिक शुल्क ${grandTotal} रुपये देय होगा।`;
-                    }
+    console.log("🎙️ Generated Voice Script:", voiceScript);
 
-                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+    // 🎙️ 3. ऑडियो वॉइस नोट जनरेट करना
+    const audioBuffer = await generateHindiVoiceNote(voiceScript);
 
-                    if (audioBuffer) {
-                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-                    }
+    if (audioBuffer) {
+        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+        console.log("✅ वॉइस नोट व्हाट्सएप पर भेज दिया गया!");
+    }
 
-                    if (item.message && item.message.trim().length > 0) {
-                        await sock.sendMessage(jid, { text: item.message });
-                        await new Promise(res => setTimeout(res, 2000));
-                    }
+    // 💬 4. व्हाट्सएप मुख्य टेक्स्ट मैसेज
+    if (item.message && item.message.trim().length > 0) {
+        await sock.sendMessage(jid, { text: item.message });
+        await new Promise(res => setTimeout(res, 2000));
+    }
 
-                    // 📄 4. A4 PDF भेजना
-                    if (item.studentName || item.name) {
-                        await sendAdmissionOrPromotionPdf(jid, item);
-                    }
-                }
+    // 📄 5. A4 PDF बनाना और भेजना
+    await sendAdmissionOrPromotionPdf(jid, item);
+}
 
                 // 🎯 C. FEE PAYMENT RECEIPT (केवल तभी चलेगा जब वास्तव में भुगतान हुआ हो)
                 else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
