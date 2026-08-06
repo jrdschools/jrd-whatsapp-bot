@@ -1079,12 +1079,13 @@ setInterval(() => {
     });
 }, 4 * 60 * 1000);
 
+// 🎙️ 🎯 TEACHER & STUDENT LIVE ATTENDANCE WITH HINDI AI VOICE NOTE (PREMIUM)
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
-    const name = body.name || 'शिक्षक';
-    const status = body.status || 'PRESENT';
-    const className = body.class || '';
+    const name = body.name || body.teacher_name || 'शिक्षक';
+    const status = (body.status || 'PRESENT').toString().toUpperCase().trim();
+    const className = body.class || body.class_name || '';
     const type = body.type || 'STUDENT_ATTENDANCE';
     const attType = (body.attendance_type || body.att_type || 'IN').toString().toUpperCase().trim();
 
@@ -1196,30 +1197,67 @@ app.post('/send-attendance', async (req, res) => {
         const jid = formattedNumber + '@s.whatsapp.net';
 
         let messageText = "";
+        let voiceScriptText = "";
 
         if (type === 'TEACHER_ATTENDANCE') {
-            if (attType === 'OUT') {
+            if (status === 'ABSENT' || status === 'A') {
+                messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *अनुपस्थिति सूचना (TEACHER ABSENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी स्थिति **अनुपस्थित (ABSENT)** दर्ज की गई है।\n\n_कृपया अपनी नियमित उपस्थिति बनाए रखें ताकि पठन-पाठन सुचारू रूप से चल सके।_\n━━━━━━━━━━━━━━━━━━━━━━━\n– Er. Sarvesh Verma (Management)`;
+                
+                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई प्रबंधन द्वारा सूचित किया जाता है कि आज विद्यालय में आपकी स्थिति अनुपस्थित दर्ज की गई है। कृपया नियमित उपस्थिति बनाए रखें। धन्यवाद!`;
+            
+            } else if (attType === 'OUT') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n🚩 *शिक्षक प्रस्थान (OUT-TIME)*\n\nआदरणीय *${name}* जी,\n\n🕒 *प्रस्थान समय:* ${cleanTime}\n🏁 *स्थिति:* कार्य दिवस पूर्ण ✅\n\n🌺 *आज का आभार संदेश:*\n_"${todayOutQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-            } else {
+                
+                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आपका आज का प्रस्थान समय ${cleanTime} बजे सफलतापूर्वक दर्ज कर लिया गया है। ${todayOutQuote} धन्यवाद!`;
+            
+            } else if (attType === 'IN') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n📋 *शिक्षक उपस्थिति (IN-TIME)*\n\nआदरणीय *${name}* जी,\nविद्यालय में आपका हार्दिक स्वागत है!\n\n🕒 *आगमन समय:* ${cleanTime}\n✅ *स्थिति:* PRESENT (उपस्थित)\n\n💭 *आज का प्रेरणादायी विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
+                
+                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई परिवार में आपका हार्दिक स्वागत है। आपका आगमन समय ${cleanTime} बजे दर्ज हो गया है। ${todayInQuote} आपका दिन शुभ हो!`;
+            
+            } else {
+                messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n✅ *उपस्थिति सूचना (PRESENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी उपस्थिति (**PRESENT**) दर्ज कर ली गई है।\n\n💭 *आज का विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
+                
+                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आज आपकी उपस्थिति सफलतापूर्वक दर्ज कर ली गई है। ${todayInQuote} धन्यवाद!`;
             }
         } else {
             const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
             if (isAbsent) {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *उपस्थिति सूचना (ABSENT)*\n\nप्रिय अभिभावक,\nआपका बच्चा *${name}* (कक्षा: ${className}) आज विद्यालय में **अनुपस्थित (ABSENT)** है।\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
+                
+                voiceScriptText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि आपका बच्चा ${name}, कक्षा ${className}, आज विद्यालय में अनुपस्थित है। धन्यवाद!`;
             } else {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n✅ *उपस्थिति सूचना (PRESENT)*\n\nप्रिय अभिभावक,\nआपका बच्चा *${name}* (कक्षा: ${className}) आज विद्यालय में **उपस्थित (PRESENT)** है।\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
+                
+                voiceScriptText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि आपका बच्चा ${name}, कक्षा ${className}, आज विद्यालय में उपस्थित है। धन्यवाद!`;
             }
         }
 
+        // 🎯 1. पहले व्हाट्सएप टेक्स्ट मैसेज भेजें
         const sent = await sock.sendMessage(jid, { text: messageText });
         if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
+
+        // 🎯 2. फिर भारतीय महिला आवाज (Swara Neural) वाला AI वॉइस नोट जनरेट करके भेजें
+        if (voiceScriptText && typeof generateHindiVoiceNote === 'function') {
+            try {
+                const audioBuffer = await generateHindiVoiceNote(voiceScriptText);
+                if (audioBuffer) {
+                    await sock.sendMessage(jid, {
+                        audio: audioBuffer,
+                        mimetype: 'audio/ogg; codecs=opus',
+                        ptt: true // WhatsApp Voice Note Style (हरा माइक)
+                    });
+                }
+            } catch (vErr) {
+                console.error("⚠️ Voice note generation failed:", vErr.message);
+            }
+        }
 
         if (updateAttendanceSmsStatus && body.attendance_id) {
             updateAttendanceSmsStatus(body.attendance_id, 'SENT');
         }
 
-        return res.status(200).json({ status: 'success', message: 'Attendance message sent successfully' });
+        return res.status(200).json({ status: 'success', message: 'Attendance message & Voice note sent successfully' });
     } catch (error) {
         console.error('❌ Attendance sending error:', error.message);
         return res.status(500).json({ status: 'error', message: error.toString() });
