@@ -1128,6 +1128,22 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
 startBot();
 
+// =========================================================================
+// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CRASH-PROOF FIXED)
+// =========================================================================
+app.get('/', (req, res) => {
+    res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`JRD VIP ERP Bot running on port ${PORT}`);
+});
+
+// बोट स्टार्ट करें
+startBot();
+
+// ⚡ सेल्फ-पिंग इंटरवल (Railway सर्वर को एक्टिव रखने के लिए)
 setInterval(() => {
     https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
         console.log('⚡ Self-Ping successful');
@@ -1135,7 +1151,6 @@ setInterval(() => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-
 // 🎙️ 🎯 TEACHER & STUDENT LIVE ATTENDANCE WITH HINDI AI VOICE NOTE (PREMIUM)
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
