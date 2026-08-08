@@ -1120,16 +1120,8 @@ app.get('/clear-lid-cache', (req, res) => {
     }
 });
 
-app.get('/', (req, res) => {
-    res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`JRD VIP ERP Bot running on port ${PORT}`));
-startBot();
-
 // =========================================================================
-// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CRASH-PROOF FIXED)
+// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CLEAN SINGLE VERSION)
 // =========================================================================
 app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
