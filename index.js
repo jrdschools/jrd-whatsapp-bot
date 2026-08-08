@@ -12,7 +12,10 @@ const os = require('os');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
-ffmpeg.setFfmpegPath(ffmpegPath);
+
+if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+}
 
 let updateAttendanceSmsStatus, testDbConnection;
 try {
@@ -26,12 +29,82 @@ try {
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz1CPviWaISRLeTB6wgSPKSjep78v7a48cHjs5-n9q4sPGUM_jqlWA2aUd2qbhUXKBC/exec";
-
 const HINDI_FEMALE_VOICE = "hi-IN-SwaraNeural";
 
+// 🌺 1 से 31 तारीख के प्रातःकालीन प्रेरणादायी विचार (IN-TIME QUOTES)
+const inQuotes = {
+    1: "एक नए महीने की शुरुआत! आइए, नए संकल्पों के साथ बच्चों के भविष्य को उज्ज्वल बनाएं।",
+    2: "शिक्षक वह दीप है जो स्वयं जलकर दूसरों के जीवन को आलोकित करता है। आपका स्वागत है!",
+    3: "आप केवल विषय नहीं पढ़ाते, आप देश के भावी नागरिकों का निर्माण करते हैं। शुभ प्रभात!",
+    4: "ज्ञान बांटना ही संसार का सबसे महान कार्य है। आपकी मेहनत से कई सपने साकार हो रहे हैं!",
+    5: "सफल शिक्षक वह है जो बच्चों में सीखने की जिज्ञासा जगाए। आइए, आज कुछ नया सिखाएं!",
+    6: "आपकी एक मुस्कान और मार्गदर्शन से किसी बच्चे का पूरा दिन बदल सकता है। शुभ प्रभात!",
+    7: "शिक्षा की जड़े कड़वी होती हैं, पर उसका फल बहुत मीठा होता है। आपकी लगन को नमन!",
+    8: "उत्कृष्टता कोई कार्य नहीं, बल्कि एक आदत है। आज फिर एक नई ऊर्जा के साथ शुरुआत करें!",
+    9: "सकारात्मक सोच और निष्ठा से किया गया अध्यापन हमेशा अमर रहता है। आपका दिन शुभ हो!",
+    10: "बच्चों के मन में ज्ञान का बीज बोना ही शिक्षक का असली सौभाग्य है। कर्मभूमि में स्वागत है!",
+    11: "धैर्य और लगन ही एक महान शिक्षक की पहचान है। आपकी उपस्थिति हमारे लिए गर्व की बात है!",
+    12: "सच्चा शिक्षक वह है जो बच्चे को उसके भीतर की क्षमता का अहसास कराए। शुभ प्रभात!",
+    13: "शिक्षा ही वह सबसे शक्तिशाली हथियार है जिससे दुनिया को बदला जा सकता है। जय हिंद!",
+    14: "ज्ञान का दान ही सबसे बड़ा दान है। आज पूरी निष्ठा से अपने दायित्व का निर्वहन करें!",
+    15: "महीने का मध्य! अपनी उसी अटूट ऊर्जा और उत्साह के साथ बच्चों का मार्गदर्शन करते रहें।",
+    16: "शिक्षकों के मार्गदर्शन के बिना सफलता का कोई भी मुकाम हासिल नहीं किया जा सकता।",
+    17: "आपकी मेहनत हर दिन एक नए भारत की नींव रख रही है। आपका आज का दिन मंगलमय हो!",
+    18: "शिक्षा केवल अक्षर ज्ञान नहीं, बल्कि चरित्र का निर्माण है। शुभ प्रभात!",
+    19: "अनुशासन और प्रेम का संतुलन ही एक आदर्श शिक्षक का आभूषण है। आपका स्वागत है!",
+    20: "आपकी दी गई सीख बच्चों के जीवन भर काम आएगी। पूरे उत्साह के साथ कार्य प्रारंभ करें!",
+    21: "विद्या ही परम धन है और आप उस धन के संरक्षक हैं। आपका दिन ऊर्जा से भरपूर रहे!",
+    22: "एक अच्छा शिक्षक एक प्रकाशस्तंभ की तरह है जो भटकते हुए जहाजों को राह दिखाता है।",
+    23: "महान कार्य करने का एक ही तरीका है कि आप अपने काम से प्यार करें। शुभ प्रभात!",
+    24: "ज्ञान की ज्योति कभी बुझती नहीं। आपकी लगन से बच्चों का जीवन हमेशा जगमगाएगा।",
+    25: "बच्चों के सपनों को पंख देने के इस पावन कार्य में आपका पुनः हार्दिक स्वागत है!",
+    26: "हर बच्चा एक खास प्रतिभा लेकर आता है, उसे पहचानने का हुनर आपके पास है।",
+    27: "सफलता का कोई संक्षिप्त रास्ता नहीं होता, आपकी निरंतर मेहनत ही इसका प्रमाण है!",
+    28: "शिक्षक वह सीढ़ी है जो खुद वहीं रहती है, पर दूसरों को ऊंचाइयों पर पहुंचा देती है।",
+    29: "आपकी निष्ठा और समर्पण ही इस विद्यालय की असली ताकत है। शुभ प्रभात!",
+    30: "सिखाने की कला ही एक शिक्षक को महान बनाती है। आज फिर कुछ नया रचें!",
+    31: "महीने का अंतिम दिन! आपके अथक प्रयासों से इस महीने कई नए अध्याय लिखे गए हैं।"
+};
+
+// 🌺 1 से 31 तारीख के सायंकालीन आभार संदेश (OUT-TIME QUOTES)
+const outQuotes = {
+    1: "महीने के पहले दिन आपकी उत्कृष्ट सेवा और मेहनत के लिए धन्यवाद। विश्राम करें और कल पुनः मिलें!",
+    2: "आज दिन भर बच्चों के भविष्य को संवारने में दिए गए योगदान के लिए आभार। आपकी शाम सुखद रहे!",
+    3: "दिन भर की निष्ठापूर्ण अध्यापन सेवा के लिए विद्यालय परिवार आपका धन्यवाद करता है। शुभ संध्या!",
+    4: "राष्ट्र निर्माण के इस पावन कार्य में आज की आपकी लगन अत्यंत सराहनीय रही। धन्यवाद!",
+    5: "एक और सफल कार्य दिवस पूर्ण हुआ! आपके अमूल्य प्रयासों और मार्गदर्शन के लिए हार्दिक धन्यवाद।",
+    6: "आज की आपकी मेहनत से कई बच्चों का जीवन समृद्ध हुआ है। विश्राम करें, शुभ संध्या!",
+    7: "दिन भर की थकान के बाद अब शांतिपूर्ण विश्राम करें। आपके अमूल्य योगदान का आभार!",
+    8: "आपकी निरंतर निष्ठा ही विद्यालय की प्रगति का आधार है। आज के समर्पण के लिए धन्यवाद!",
+    9: "आज का कार्य दिवस सफलतापूर्वक संपन्न हुआ। आपकी लगन को JRD परिवार का नमन!",
+    10: "बच्चों के उज्ज्वल भविष्य की नींव रखने के लिए धन्यवाद। आपकी शाम आनंदमय रहे!",
+    11: "आज दिए गए ज्ञान और संस्कारों के लिए विद्यालय प्रबंधन आपका आभार व्यक्त करता है।",
+    12: "मेहनत रंग लाती है! आज के आपके सराहनीय प्रयासों के लिए हार्दिक धन्यवाद। शुभ संध्या!",
+    13: "दिन भर के उत्कृष्ट अध्यापन के लिए धन्यवाद। विश्राम करें और कल पुनः नई ऊर्जा से मिलें!",
+    14: "ज्ञान के इस पावन यज्ञ में आज की आपकी आहुति के लिए धन्यवाद। आपका समय सुखद हो!",
+    15: "मध्य महीने तक आपकी अटूट सेवा के लिए आभार! विश्राम करें और कल पुनः मिलें।",
+    16: "आज का दिन बहुत ही फलदायी रहा। आपकी निरंतर मेहनत के लिए हार्दिक धन्यवाद!",
+    17: "बच्चों को दिए गए आपके अनमोल समय और ज्ञान के लिए विद्यालय परिवार आभारी है।",
+    18: "आज का कार्य दिवस पूर्ण हुआ। आपकी लगन और निष्ठा के लिए कोटि-कोटि धन्यवाद!",
+    19: "शिक्षकों के समर्पण से ही विद्यालय का नाम रोशन होता है। आज के योगदान के लिए आभार!",
+    20: "आपकी आज की मेहनत से बच्चों ने कुछ नया सीखा है। शुभ संध्या व शांतिपूर्ण रात्रि!",
+    21: "दिन भर की उत्कृष्ट सेवा के लिए JRD परिवार आपका आभार व्यक्त करता है। विश्राम करें!",
+    22: "शिक्षा के प्रति आपकी सच्ची निष्ठा को नमन! आज का कार्य दिवस सफलतापूर्वक पूर्ण हुआ।",
+    23: "बच्चों के सर्वांगीण विकास में आज दिए गए आपके योगदान के लिए हार्दिक धन्यवाद!",
+    24: "एक और प्रेरक दिन संपन्न हुआ! आपकी अटूट मेहनत के लिए धन्यवाद, शुभ संध्या!",
+    25: "ज्ञान बांटने का आज का आपका सफर बहुत ही सराहनीय रहा। विश्राम करें!",
+    26: "आपकी उपस्थिति और मार्गदर्शन ही बच्चों की असली ताकत है। आज के लिए धन्यवाद!",
+    27: "दिन भर की थकान के बाद अब अपने परिवार के साथ सुखद समय बिताएं। आभार!",
+    28: "आपकी निष्ठा से विद्यालय नित नई ऊंचाइयों को छू रहा है। आज की सेवा के लिए धन्यवाद!",
+    29: "सफल कार्य दिवस की बधाई! आपके अमूल्य प्रयासों के लिए विद्यालय परिवार आभारी है।",
+    30: "आज के समर्पित अध्यापन कार्य के लिए धन्यवाद। आपकी शाम सुखद और शांतिपूर्ण रहे!",
+    31: "पूरे महीने आपकी अथक मेहनत और समर्पित सेवा के लिए JRD परिवार आपका हार्दिक आभार व्यक्त करता है!"
+};
+
+// 🛡️ सुरक्षित और साफ टेक्स्ट निष्कर्षण
 function safePdfText(str, fallback = 'N/A') {
-    if (!str) return fallback;
-    let clean = String(str).replace(/[^\x00-\x7F]/g, '').trim();
+    if (!str || str === 'undefined' || str === 'null') return fallback;
+    let clean = String(str).replace(/[^\x20-\x7E]/g, '').trim();
     return clean.length > 0 ? clean : fallback;
 }
 
@@ -42,12 +115,7 @@ function calculateDynamicDue(student) {
     const totalPaid = parseFloat(student.total_paid || student.paid || 0);
 
     const currentMonth = new Date().getMonth() + 1;
-    let elapsedMonths = 0;
-    if (currentMonth >= 4) {
-        elapsedMonths = currentMonth - 3;
-    } else {
-        elapsedMonths = currentMonth + 9;
-    }
+    let elapsedMonths = (currentMonth >= 4) ? (currentMonth - 3) : (currentMonth + 9);
 
     let actualMonthlyFee = (studentType === 'RTE') ? 0 : monthlyFee;
     let expectedTillMonth = actualMonthlyFee * elapsedMonths;
@@ -112,7 +180,7 @@ function forceClearAuthFolder() {
             console.log('🧹 Auth Folder पूरी तरह से साफ़ कर दिया गया!');
         }
     } catch (e) {
-        console.error('❌ Error clearing Auth Folder:', e.message);
+        console.error('❌ Auth Folder साफ़ करने में त्रुटि:', e.message);
     }
 }
 
@@ -126,9 +194,7 @@ function pnJidToIndianMobile(candidate) {
         const p = digits.substring(2);
         if (/^[6-9]\d{9}$/.test(p)) return p;
     }
-
     if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) return digits;
-
     if (digits.length > 0 && digits.length <= 13) {
         const match = digits.match(/[6-9]\d{9}/);
         if (match && match[0]) return match[0];
@@ -139,7 +205,6 @@ function pnJidToIndianMobile(candidate) {
 async function extractGuardianPhone(jid, msg) {
     try {
         const directCandidates = [];
-
         if (msg?.key?.remoteJidAlt) directCandidates.push(msg.key.remoteJidAlt);
         if (msg?.key?.participantAlt) directCandidates.push(msg.key.participantAlt);
         if (msg?.key?.participant) directCandidates.push(msg.key.participant);
@@ -174,10 +239,9 @@ async function extractGuardianPhone(jid, msg) {
             if (lidPhoneMap[lidJid]) return lidPhoneMap[lidJid];
         }
 
-        console.log(`⚠️ [LID-UNRESOLVED] गार्जियन का असली मोबाइल नंबर नहीं निकल पाया। Raw JID: ${jid}`);
         return null;
     } catch (e) {
-        console.error('❌ extractGuardianPhone में त्रुटि:', e.message);
+        console.error('❌ extractGuardianPhone त्रुटि:', e.message);
         return null;
     }
 }
@@ -187,7 +251,7 @@ async function startBot() {
     isConnecting = true;
 
     try {
-        console.log('⚡ JRD VIP WhatsApp Bot स्टार्ट हो रहा है...');
+        console.log('⚡ JRD VIP WhatsApp Bot प्रारंभ हो रहा है...');
         const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
 
         let latestVersion = [2, 3000, 1017531287];
@@ -231,7 +295,7 @@ async function startBot() {
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
 
                 if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-                    console.log('❌ सेशन समाप्त। नया QR कोड जनरेट हो रहा है...');
+                    console.log('❌ सेशन समाप्त। नया सेशन बनाया जा रहा है...');
                     forceClearAuthFolder();
                     setTimeout(() => startBot(), 1500);
                 } else {
@@ -242,7 +306,7 @@ async function startBot() {
                 currentQrCode = '';
                 isBotReady = true;
                 console.log('\n=============================================');
-                console.log(' 🎉 JRD VIP ERP Bot Active & Ready on Railway! ');
+                console.log(' 🎉 JRD VIP ERP Bot Active & Ready! ');
                 console.log('=============================================\n');
             }
         });
@@ -261,7 +325,7 @@ async function startBot() {
             const rawText = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             const lowerText = rawText.toLowerCase();
 
-            console.log(`📱 मैसेज आया | निष्पादित गार्जियन नंबर: [${senderPhone}] | टेक्स्ट: "${rawText}"`);
+            console.log(`📱 संदेश प्राप्त | नंबर: [${senderPhone || 'अज्ञात'}] | पाठ: "${rawText}"`);
 
             if (!senderPhone) {
                 const possiblePhone = rawText.replace(/[^0-9]/g, '');
@@ -273,17 +337,17 @@ async function startBot() {
 
                         if (verifyRes.data?.status !== 'unregistered_number') {
                             saveLidPhoneMapping(jid, possiblePhone);
-                            await sendReply(jid, `✅ *आपका नंबर सफलतापूर्वक जुड़ गया है!*\n\nकृपया दोबारा *Hi* लिखें और मेन्यू देखें।`);
+                            await sendReply(jid, `🙏 *नमस्ते!*\n\nआपका मोबाइल नंबर (*${possiblePhone}*) सफलतापूर्वक पंजीकृत कर लिया गया है।\n\nकृपया मुख्य मेन्यू देखने हेतु **Hi** लिखकर भेजें।`);
                         } else {
-                            await sendReply(jid, `❌ यह नंबर (*${possiblePhone}*) विद्यालय डेटाबेस में पंजीकृत नहीं है।\n\nकृपया अपना सही पंजीकृत नंबर दोबारा भेजें।`);
+                            await sendReply(jid, `🙏 *आदरणीय अभिभावक,*\n\nयह मोबाइल नंबर (*${possiblePhone}*) विद्यालय रिकॉर्ड में पंजीकृत नहीं है।\n\nकृपया सही पंजीकृत नंबर भेजें अथवा विद्यालय कार्यालय में संपर्क करें।`);
                         }
                     } catch (e) {
-                        await sendReply(jid, `⚠️ सत्यापन में त्रुटि हुई। कृपया कुछ देर बाद पुनः प्रयास करें।`);
+                        await sendReply(jid, `⚠️ सत्यापन प्रक्रिया में त्रुटि हुई। कृपया थोड़ी देर बाद प्रयास करें।`);
                     }
                     return;
                 }
 
-                await sendReply(jid, `👋 *नमस्ते!*\nWhatsApp की नई प्राइवेसी सेटिंग के कारण आपका नंबर स्वतः नहीं पहचाना जा सका।\n\n📱 कृपया अपना वही *10 अंकों का मोबाइल नंबर* भेजें जो विद्यालय में पंजीकृत है (उदाहरण: 9792649799)।`);
+                await sendReply(jid, `🙏 *नमस्ते!*\n\nJ.R.D. Public School की डिजिटल हेल्पलाइन में आपका स्वागत है।\n\nसुरक्षा कारणों से आपका नंबर स्वतः पहचाना नहीं जा सका। कृपया अपना **10 अंकों का पंजीकृत मोबाइल नंबर** यहाँ टाइप करके भेजें (उदा: 9792649799)।`);
                 return;
             }
 
@@ -292,19 +356,19 @@ async function startBot() {
 
             if (isOptionNum) {
                 if (lowerText === '1') {
-                    await sendReply(jid, `📝 *प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *JRD Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय शिक्षा\n• आधुनिक कंप्यूटर लैब व योग्य शिक्षक\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
+                    await sendReply(jid, `📝 *नया प्रवेश प्रारंभ (सत्र 2026-27)*\n🏫 *J.R.D. Public School, मरुई, वाराणसी*\n━━━━━━━━━━━━━━━━━━━━━━━\n• संस्कारयुक्त एवं उच्च स्तरीय डिजिटल शिक्षा\n• कंप्यूटर लैब एवं योग्य शिक्षक वृन्द\n\n📞 *प्रवेश हेतु विद्यालय कार्यालय में संपर्क करें।*`);
                     return;
                 }
                 if (lowerText === '2') {
-                    await sendReply(jid, `⏰ *स्कूल समय एवं नियम*\n🏫 *JRD Public School*\n━━━━━━━━━━━━━━━━━━━━━━━\n⏱ *समय:* सुबह 07:30 AM से दोपहर 01:30 PM तक\n📅 *दिन:* सोमवार से शनिवार\n\n_नोट: कृपया बच्चों को पूर्ण गणवेश (Uniform) में समय से भेजें।_`);
+                    await sendReply(jid, `⏰ *स्कूल समय सारणी*\n🏫 *J.R.D. Public School*\n━━━━━━━━━━━━━━━━━━━━━━━\n⏱ *समय:* प्रातः 07:30 AM से दोपहर 01:30 PM तक\n📅 *दिन:* सोमवार से शनिवार\n\n_नोट: कृपया बच्चों को समय से पूर्ण गणवेश (Uniform) में भेजें।_`);
                     return;
                 }
                 if (lowerText === '3') {
-                    await sendReply(jid, `👑 *प्रबंधकीय संदेश*\n🏫 *JRD Public School Management*\n━━━━━━━━━━━━━━━━━━━━━━━\n✨ *संस्थापक:* श्री बंशगोपाल वर्मा जी\n✨ *प्रबंधक:* डॉ. बंशलाल जी\n\n> *"हम प्रत्येक बच्चे के सर्वांगीण विकास एवं उज्ज्वल भविष्य के लिए पूर्णतः समर्पित हैं।"*`);
+                    await sendReply(jid, `👑 *प्रबंधकीय संदेश*\n🏫 *J.R.D. Public School Management*\n━━━━━━━━━━━━━━━━━━━━━━━\n✨ *संस्थापक:* स्व. श्री बंशगोपाल वर्मा जी\n✨ *प्रबंधक:* डॉ. बंशलाल जी\n\n> *"हम प्रत्येक बच्चे के सर्वांगीण विकास एवं उज्ज्वल भविष्य के लिए समर्पित हैं।"*`);
                     return;
                 }
                 if (lowerText === '4') {
-                    await sendReply(jid, `📍 *विद्यालय लोकेशन:*\nJRD Public School, ग्राम व पोस्ट - मरुई, जिला - वाराणसी (उ.प्र.)\n\n🗺 *गूगल मैप्स पर ढूँढें:*\nGoogle Maps पर खोजें: *JRD Public School Marui Varanasi*`);
+                    await sendReply(jid, `📍 *विद्यालय लोकेशन:*\nJ.R.D. Public School, ग्राम व पोस्ट - मरुई, चोलापुर, जिला - वाराणसी (उ.प्र.) - 221208\n\n🗺 *गूगल मैप्स पर ढूँढें:*\nGoogle Maps पर खोजें: *JRD Public School Marui Varanasi*`);
                     return;
                 }
             }
@@ -318,15 +382,15 @@ async function startBot() {
 
                 if (resData.status === 'unregistered_number') {
                     if (isGreeting || isOptionNum || !rawText.includes('#')) {
-                        await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 हमारे विद्यालय की डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nअधिक जानकारी या संपर्क के लिए विकल्प भेजें:\n1️⃣ एडमिशन जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में पंजीकृत नहीं है।_`);
+                        await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई (वाराणसी)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 डिजिटल हेल्पलाइन में आपका स्वागत है!\n\nसत्र 2026-27 हेतु नए प्रवेश प्रारंभ हैं।\nविकल्प संख्या भेजें:\n1️⃣ प्रवेश जानकारी\n2️⃣ स्कूल टाइमिंग\n3️⃣ प्रबंधक संदेश\n4️⃣ लोकेशन\n\n_नोट: आपका मोबाइल नंबर (${senderPhone}) छात्र डेटाबेस में नहीं है।_`);
                     } else {
-                        await sendReply(jid, `🛑 *अनधिकृत पहुँच (Access Denied)*\n\nआपका मोबाइल नंबर (*${senderPhone}*) विद्यालय के आधिकारिक डेटाबेस में पंजीकृत नहीं है।\n\nसुरक्षा कारणों से छात्र विवरण केवल पंजीकृत अभिभावक को ही दिखाया जाता है।`);
+                        await sendReply(jid, `🛑 *अनधिकृत पहुँच*\n\nआपका मोबाइल नंबर (*${senderPhone}*) आधिकारिक डेटाबेस में पंजीकृत नहीं है।`);
                     }
                     return;
                 }
 
                 if (isGreeting) {
-                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\nसूचना प्राप्त करने के लिए संबंधित **नंबर** भेजें:\n\n1️⃣ *नया एडमिशन (सत्र 2026-27)*\n2️⃣ *स्कूल टाइमिंग एवं शेड्यूल*\n3️⃣ *प्रबंधकीय एवं संस्थापक संदेश*\n4️⃣ *विद्यालय का पता व लोकेशन*\n\n🔎 *अपने बच्चे की फीस / प्रोफाइल देखने के लिए:*\nबच्चे का **नाम** या **Enrolment No.** लिखकर भेजें (उदा: *#Aditya* या *1024*)\n\n_आपका नंबर पंजीकृत है ✅_`;
+                    const menuText = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n━━━━━━━━━━━━━━━━━━━━━━━\n🙏 *अभिभावक डिजिटल सेवा केंद्र*\n\n1️⃣ *नया एडमिशन (2026-27)*\n2️⃣ *स्कूल टाइमिंग*\n3️⃣ *प्रबंधक संदेश*\n4️⃣ *लोकेशन*\n\n🔎 *बच्चे की फीस / प्रोफाइल देखने हेतु:*\nबच्चे का **नाम** (# के साथ) या **Enrolment No.** भेजें (उदा: *#Aditya* या *1024*)\n\n_आपका नंबर पंजीकृत है ✅_`;
                     await sendReply(jid, menuText);
                     return;
                 }
@@ -335,24 +399,24 @@ async function startBot() {
                     if (resData.status === 'success') {
                         await sendStudentProfileCard(jid, resData.data);
                     } else if (resData.status === 'student_not_associated_with_number' || resData.status === 'not_found') {
-                        await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला!*\n\nछात्र का नाम/विवरण *"${searchQuery}"* आपके पंजीकृत मोबाइल नंबर से जुड़ा हुआ नहीं पाया गया।\n\nकृपया सही नाम # के साथ लिखें (उदा: *#Aditya*) या सही Enrolment No भेजें।`);
+                        await sendReply(jid, `❌ *रिकॉर्ड नहीं मिला*\n\nछात्र विवरण *"${searchQuery}"* आपके पंजीकृत मोबाइल नंबर से जुड़ा नहीं मिला।\n\nकृपया सही नाम # के साथ (उदा: *#Aditya*) या Enrolment No भेजें।`);
                     }
                     return;
                 }
 
-                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nअपने बच्चे की फीस या प्रोफाइल देखने के लिए उसका **नाम** (# के साथ) या **Enrolment No** भेजें (उदा: *#Aditya*)।\n\nमुख्य मेन्यू के लिए **Menu** लिखें।`);
+                await sendReply(jid, `🙏 *JRD Public School, मरुई* में आपका स्वागत है!\n\nबच्चे की फीस या प्रोफाइल देखने के लिए उसका **नाम** (# के साथ) या **Enrolment No** भेजें (उदा: *#Aditya*)।\n\nमुख्य मेन्यू हेतु **Menu** लिखें।`);
 
             } catch (error) {
                 console.error('Database Search Error:', error.message);
                 if (isGreeting) {
-                    await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n\nमुख्य मेन्यू देखने के लिए **Menu** लिखें।`);
+                    await sendReply(jid, `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n\nमुख्य मेन्यू देखने हेतु **Menu** लिखें।`);
                 }
             }
         });
 
     } catch (err) {
         isConnecting = false;
-        console.error('❌ startBot error:', err.message);
+        console.error('❌ startBot त्रुटि:', err.message);
     }
 }
 
@@ -363,18 +427,18 @@ async function sendReply(jid, text) {
             if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: text });
         }
     } catch (err) {
-        console.error('❌ रिप्लाई भेजने में त्रुटि:', err.message);
+        console.error('❌ उत्तर भेजने में त्रुटि:', err.message);
     }
 }
 
 async function sendStudentProfileCard(jid, s) {
     const calc = calculateDynamicDue(s);
-    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र (Session):* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar/Reg No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क (Paid):* ₹${s.total_paid || 0}\n\n📊 *भुगतान/जमा विवरण:*\n${s.paid_list || 'कोई जमा फीस दर्ज नहीं है'}\n\n⚠️ *बकाया शुल्क विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *बहीखाता कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया (टिल मन्थ):* ₹${calc.currentDue}\n• *पिछला बकाया (Old Due):* ₹${calc.oldDue}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${calc.grandTotalDue}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि फ़ीस अथवा विवरण में कोई त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
+    const replyMsg = `🎓 *STUDENT OFFICIAL PROFILE*\n🏫 *JRD Public School, Marui*\n📅 *सत्र:* ${s.session || '2026-27'}\n━━━━━━━━━━━━━━━━━━━━━━━\n🆔 *Enrolment No:* \`${s.enrolment || 'N/A'}\` \n📜 *Scholar No:* ${s.scholar_no || 'N/A'}\n🔢 *Roll No:* ${s.roll_no || 'N/A'}\n\n👤 *छात्र का नाम:* *${s.name}*\n👨‍👦 *पिता का नाम:* ${s.father}\n👩‍👦 *माता का नाम:* ${s.mother}\n🏫 *कक्षा:* ${s.class} (${s.type || 'REGULAR'})\n\n💰 *कुल जमा शुल्क:* ₹${s.total_paid || 0}\n\n📊 *जमा विवरण:*\n${s.paid_list || 'कोई जमा रिकॉर्ड दर्ज नहीं है'}\n\n⚠️ *बकाया विवरण:*\n${s.due_list || 'सभी फ़ीस जमा हैं 🎉'}\n\n━━━━━━━━━━━━━━━━━━━━━━━\n🧾 *कुल बकाया ब्रेकडाउन (DUE SUMMARY):*\n• *चालू सत्र बकाया:* ₹${calc.currentDue}\n• *पिछला बकाया (Old Due):* ₹${calc.oldDue}\n---------------------------------------\n🚩 *कुल देय राशि (GRAND TOTAL DUE): ₹${calc.grandTotalDue}*\n━━━━━━━━━━━━━━━━━━━━━━━\n_यदि विवरण में त्रुटि हो, तो विद्यालय कार्यालय में संपर्क करें।_`;
 
     await sendReply(jid, replyMsg);
 }
 
-// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER (GARBAGE-FREE CLEAN ENGINE)
+// 📄 BRANDED ADMISSION / PROMOTION PDF CERTIFICATE BUILDER
 async function sendAdmissionOrPromotionPdf(jid, item) {
     return new Promise((resolve) => {
         try {
@@ -387,20 +451,18 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                     const pdfBuffer = Buffer.concat(buffers);
                     const actionType = String(item.type || item.action || '').toUpperCase();
                     const isPromo = actionType.includes('PROMOT') || item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-                    
+
                     const title = isPromo ? 'Promotion_Certificate' : 'Admission_Confirmation';
                     const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 छात्र *${item.studentName || item.name || ''}* का आधिकारिक ${isPromo ? 'कक्षा पदोन्नति प्रमाण पत्र एवं स्वीकृत फ़ीस विवरण (Promotion Letter)' : 'प्रवेश पत्र एवं फ़ीस विवरण (Admission Form)'} PDF।`;
 
-                    if (sock) {
+                    if (sock && isBotReady) {
                         await sock.sendMessage(jid, {
                             document: pdfBuffer,
                             mimetype: 'application/pdf',
                             fileName: `${title}_${safePdfText(item.studentName || item.name, 'Student')}.pdf`,
                             caption: captionText
                         });
-                        console.log(`✅ ${isPromo ? 'प्रमोशन' : 'एडमिशन'} Z-Engine PDF बिना किसी फॉन्ट एरर के सफलतापूर्वक भेज दी गई!`);
-                    } else {
-                        console.error('🛑 WhatsApp Socket उपलब्ध नहीं है!');
+                        console.log(`✅ ${isPromo ? 'प्रमोशन' : 'एडमिशन'} PDF सफलतापूर्वक प्रेषित!`);
                     }
                     resolve();
                 } catch (e) {
@@ -409,36 +471,30 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 }
             });
 
-            // 🎨 1. थीम कलर्स (Promotion = Emerald Teal, Admission = Deep Navy)
             const actionType = String(item.type || item.action || '').toUpperCase();
             const isPromo = actionType.includes('PROMOT') || item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
             const mainColor = isPromo ? '#0F766E' : '#1A365D';
 
-            // 🖼️ 2. बैकग्राउंड वाटरमार्क (Background Watermark)
             doc.save();
             doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
             doc.fillColor(mainColor).fillOpacity(0.03).fontSize(38).font('Helvetica-Bold');
             doc.text('J.R.D. PUBLIC SCHOOL', doc.page.width / 2 - 220, doc.page.height / 2 - 20, { align: 'center' });
             doc.restore();
 
-            // 🖼️ 3. डबल रॉयल बॉर्डर
             doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).strokeColor(mainColor).stroke();
             doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).strokeColor(mainColor).stroke();
 
-            // 🏛️ 4. ऑफिशियल स्कूल हेडर बैंड
             doc.rect(25, 25, doc.page.width - 50, 65).fillColor(mainColor).fill();
             doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 34, { align: 'center' });
             doc.fontSize(8.5).font('Helvetica').text('Gram & Post - Marui, Cholapur, Varanasi (U.P.) - 221208', 25, 59, { align: 'center' });
             doc.fontSize(8).font('Helvetica-Bold').text('UDISE CODE: 09670804504 | BOARD: BASIC SHIKSHA PARISHAD U.P.', 25, 71, { align: 'center' });
 
-            // 📜 5. टाइटल बैज
             doc.rect(25, 100, doc.page.width - 50, 24).fillColor('#F1F5F9').fill();
             doc.fillColor(mainColor).fontSize(10.5).font('Helvetica-Bold').text(
                 isPromo ? 'OFFICIAL CLASS PROMOTION CERTIFICATE & APPROVED FEE STRUCTURE (2026-27)' : 'OFFICIAL ADMISSION CONFIRMATION SLIP & FEE STRUCTURE (2026-27)',
                 25, 107, { align: 'center' }
             );
 
-            // 👤 6. छात्र पर्सनल इनफ़ॉर्मेशन ग्रिड (कचरा-मुक्त लेबल्स)
             const gridTop = 135;
             doc.rect(25, gridTop, doc.page.width - 50, 140).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
 
@@ -461,7 +517,6 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             drawRow(isPromo ? 'Promoted Class :' : 'Allocated Class :', classDisplayVal, true);
             drawRow('Category / Student Type :', item.studentType || (isPromo ? 'PROMOTED (OLD)' : 'NEW ADMISSION'));
 
-            // 💰 7. Z-ENGINE स्वीकृत फ़ीस विवरण टेबल (कचरा-मुक्त लेबल्स)
             const feeTop = gridTop + 152;
             doc.rect(25, feeTop, doc.page.width - 50, 20).fillColor(mainColor).fill();
             doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold').text('APPROVED SESSION FEE BREAKDOWN (2026-27)', 35, feeTop + 5);
@@ -484,7 +539,6 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
                 feeY += 18;
             };
 
-            // मदवार फ़ीस जोड़ना
             let fs = item.feeStructure || {};
             let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
             let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
@@ -499,14 +553,12 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
             addFeeRow('Board Exam Fee', fs.board_fee || item.board_fee);
             addFeeRow('Admit Card Fee', fs.admit_card_fee || item.admit_card_fee);
 
-            // 📊 8. कुल योग (Grand Total Band)
             let grandTotalAmt = parseFloat(fs.grand_total || item.totalAmount || totalFeeSum || 0);
             doc.rect(25, feeY, doc.page.width - 50, 22).fillColor('#E0E7FF').fill();
             doc.fillColor(mainColor).fontSize(10).font('Helvetica-Bold');
             doc.text('TOTAL APPROVED ANNUAL FEE :', 35, feeY + 6);
             doc.text(`Rs. ${grandTotalAmt.toLocaleString('en-IN')}/-`, doc.page.width - 160, feeY + 6, { align: 'right' });
 
-            // ✍️ 9. डिक्लेरेशन, सील एवं सिग्नेचर ब्लॉक
             const footerY = doc.page.height - 115;
             doc.rect(25, footerY, doc.page.width - 50, 36).fillColor('#F8FAFC').fill();
             doc.fillColor('#334155').fontSize(8).font('Helvetica-Oblique').text(
@@ -530,14 +582,6 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
     });
 }
 
-// 🛡️ Safe Text Cleanser Function (गार्बेज कैरेक्टर प्रोटेक्शन)
-function safePdfText(val, fallback = 'N/A') {
-    if (!val || val === 'undefined' || val === 'null') return fallback;
-    // केवल एएससीआई (ASCII) और सेफ़ कैरेक्टर्स को रहने दें
-    let cleaned = String(val).replace(/[^\x20-\x7E]/g, '').trim();
-    return cleaned.length > 0 ? cleaned : fallback;
-}
-// 📄 SHARED BRANDED PDF BUILDER (FOR FEE STATEMENTS)
 function buildBrandedFeePdfDoc(doc, data, opts) {
     const headerColor = opts.headerColor || '#1A365D';
     const bandLabel = opts.bandLabel || 'OFFICIAL FEE STATEMENT';
@@ -619,7 +663,6 @@ function buildBrandedFeePdfDoc(doc, data, opts) {
     doc.text('OFFICIAL SEAL & STAMP', doc.page.width - 115, footerY + 8, { width: 95, align: 'center' });
 }
 
-// 📄 BRANDED OFFICIAL PDF RECEIPT (FOR PAID FEES)
 async function sendFeePdfReceipt(jid, data) {
     return new Promise((resolve) => {
         try {
@@ -631,7 +674,7 @@ async function sendFeePdfReceipt(jid, data) {
                 try {
                     const pdfBuffer = Buffer.concat(buffers);
                     if (sock && isBotReady) {
-                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n🧾 छात्र *${data.name || data.studentName || ''}* की आधिकारिक डिजिटल फीस जमा रसीद।`;
+                        const captionText = `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n🧾 छात्र *${data.name || data.studentName || ''}* की आधिकारिक फीस जमा रसीद।`;
                         const sent = await sock.sendMessage(jid, {
                             document: pdfBuffer,
                             mimetype: 'application/pdf',
@@ -666,7 +709,6 @@ async function sendFeePdfReceipt(jid, data) {
     });
 }
 
-// 📄 BRANDED OFFICIAL FEE REMINDER / STRUCTURE NOTICE PDF
 async function sendFeeReminderPdf(jid, data) {
     return new Promise((resolve) => {
         try {
@@ -710,11 +752,16 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 
-// 🎙️ Indian Hindi Female Voice Engine (Microsoft Edge Neural TTS)
+// 🎙️ सुरक्षित एवं क्रैश-प्रूफ Swara Neural AI वॉइस जनरेटर
 async function generateHindiVoiceNote(text) {
     const stamp = Date.now() + '_' + Math.floor(Math.random() * 100000);
     const mp3Path = path.join(os.tmpdir(), `voice_${stamp}.mp3`);
     const oggPath = path.join(os.tmpdir(), `voice_${stamp}.ogg`);
+
+    const cleanup = () => {
+        try { if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path); } catch (e) {}
+        try { if (fs.existsSync(oggPath)) fs.unlinkSync(oggPath); } catch (e) {}
+    };
 
     try {
         const tts = new MsEdgeTTS();
@@ -725,11 +772,10 @@ async function generateHindiVoiceNote(text) {
         await new Promise((resolve, reject) => {
             audioStream.on('data', (chunk) => chunks.push(chunk));
             audioStream.on('end', resolve);
-            audioStream.on('close', resolve);
             audioStream.on('error', reject);
         });
-        const fullBuffer = Buffer.concat(chunks);
-        fs.writeFileSync(mp3Path, fullBuffer);
+
+        fs.writeFileSync(mp3Path, Buffer.concat(chunks));
 
         return await new Promise((resolve) => {
             ffmpeg(mp3Path)
@@ -740,21 +786,21 @@ async function generateHindiVoiceNote(text) {
                 .on('end', () => {
                     try {
                         const buffer = fs.readFileSync(oggPath);
-                        try { fs.unlinkSync(mp3Path); } catch (e) {}
-                        try { fs.unlinkSync(oggPath); } catch (e) {}
+                        cleanup();
                         resolve(buffer);
                     } catch (readErr) {
+                        cleanup();
                         resolve(null);
                     }
                 })
-                .on('error', (ffErr) => {
-                    try { fs.unlinkSync(mp3Path); } catch (e) {}
+                .on('error', () => {
+                    cleanup();
                     resolve(null);
                 })
                 .save(oggPath);
         });
     } catch (err) {
-        console.error('❌ Edge TTS Engine Error, फॉलबैक इस्तेमाल हो रहा है:', err.message);
+        console.error('⚠️ Edge TTS असफल, फॉलबैक का उपयोग हो रहा है:', err.message);
         try {
             const encodedText = encodeURIComponent(text);
             const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=hi&client=tw-ob`;
@@ -783,44 +829,27 @@ async function generateHindiVoiceNote(text) {
                     .on('end', () => {
                         try {
                             const buffer = fs.readFileSync(oggPath);
-                            try { fs.unlinkSync(mp3Path); } catch (e) {}
-                            try { fs.unlinkSync(oggPath); } catch (e) {}
+                            cleanup();
                             resolve(buffer);
-                        } catch (readErr) {
+                        } catch (e) {
+                            cleanup();
                             resolve(null);
                         }
                     })
-                    .on('error', (ffErr) => {
-                        try { fs.unlinkSync(mp3Path); } catch (e) {}
+                    .on('error', () => {
+                        cleanup();
                         resolve(null);
                     })
                     .save(oggPath);
             });
         } catch (fallbackErr) {
-            console.error('❌ Fallback Voice Engine भी विफल:', fallbackErr.message);
-            try { if (fs.existsSync(mp3Path)) fs.unlinkSync(mp3Path); } catch (e) {}
+            cleanup();
             return null;
         }
     }
 }
 
-async function sendFeeVoiceNote(jid, data) {
-    try {
-        const spokenText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि छात्र ${data.name || data.studentName || ''} की फीस ${data.paid || 0} रुपये सफलतापूर्वक जमा हो गई है। डिजिटल रसीद और विवरण हेतु संदेश देखें। धन्यवाद!`;
-        const audioBuffer = await generateHindiVoiceNote(spokenText);
-
-        if (audioBuffer && sock && isBotReady) {
-            await sock.sendMessage(jid, {
-                audio: audioBuffer,
-                mimetype: 'audio/ogg; codecs=opus',
-                ptt: true
-            });
-        }
-    } catch (err) {
-        console.error('❌ वॉइस नोट भेजने में त्रुटि:', err.message);
-    }
-}
-
+// 🛡️ सुरक्षित और क्रैश-प्रूफ ऑटो-मैसेज प्रोसेसिंग क्यू
 let messageQueue = [];
 let isProcessingQueue = false;
 
@@ -841,15 +870,15 @@ async function processQueue() {
                 if (item.type === 'FEE_REMINDER_COMBO' || item.type === 'FEE_STRUCTURE_COMBO') {
                     const voiceScript = (item.voiceText && item.voiceText.trim().length > 0)
                         ? item.voiceText
-                        : `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से विनम्र निवेदन है। आपके बच्चे ${item.studentName || ''} की फीस ${item.totalAmount || 0} रुपये अभी बकाया है। कृपया इसे शीघ्र जमा करने का कष्ट करें, ताकि बच्चे की पढ़ाई में कोई दिक्कत न आए। धन्यवाद!`;
+                        : `नमस्कार! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से विनम्र निवेदन है। आपके बच्चे ${item.studentName || ''} की फीस ${item.totalAmount || 0} रुपये अभी बकाया है। कृपया इसे शीघ्र जमा करने का कष्ट करें। धन्यवाद!`;
 
                     const audioBuffer = await generateHindiVoiceNote(voiceScript);
                     if (audioBuffer) {
                         await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
                     }
 
-                    await sock.sendMessage(jid, { text: item.message });
-                    await new Promise(res => setTimeout(res, 2000));
+                    if (item.message) await sock.sendMessage(jid, { text: item.message });
+                    await new Promise(res => setTimeout(res, 1500));
 
                     if (item.qrUrl) {
                         await sock.sendMessage(jid, {
@@ -858,164 +887,122 @@ async function processQueue() {
                         });
                     }
 
-                    await new Promise(res => setTimeout(res, 1500));
+                    await new Promise(res => setTimeout(res, 1200));
                     await sendFeeReminderPdf(jid, item);
                 }
 
-              // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
-else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
-    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-    
-    // 💰 1. Z-Engine फ़ीस स्ट्रक्चर और ग्रैंड टोटल की सटीक गणना
-    const fs = item.feeStructure || {};
-    
-    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
-    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
-    let admFee = parseFloat(fs.admission_fee || item.admission_fee || 0);
-    let regFee = parseFloat(fs.registration_fee || item.registration_fee || 0);
-    let chgFee = parseFloat(fs.class_change_fee || item.class_change_fee || 0);
-    let halfFee = parseFloat(fs.half_yearly_exam_fee || item.half_yearly_exam_fee || 0);
-    let annuFee = parseFloat(fs.annual_exam_fee || item.annual_exam_fee || 0);
-    let pracFee = parseFloat(fs.practical_fee || item.practical_fee || 0);
-    let boardFee = parseFloat(fs.board_fee || item.board_fee || 0);
-    let admitFee = parseFloat(fs.admit_card_fee || item.admit_card_fee || 0);
+                // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION
+                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
+                    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
+                    const fs = item.feeStructure || {};
 
-    let calculatedGrandTotal = mTotal + admFee + regFee + chgFee + halfFee + annuFee + pracFee + boardFee + admitFee;
-    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || calculatedGrandTotal || 0;
+                    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
+                    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+                    let admFee = parseFloat(fs.admission_fee || item.admission_fee || 0);
+                    let regFee = parseFloat(fs.registration_fee || item.registration_fee || 0);
+                    let chgFee = parseFloat(fs.class_change_fee || item.class_change_fee || 0);
+                    let halfFee = parseFloat(fs.half_yearly_exam_fee || item.half_yearly_exam_fee || 0);
+                    let annuFee = parseFloat(fs.annual_exam_fee || item.annual_exam_fee || 0);
+                    let pracFee = parseFloat(fs.practical_fee || item.practical_fee || 0);
+                    let boardFee = parseFloat(fs.board_fee || item.board_fee || 0);
+                    let admitFee = parseFloat(fs.admit_card_fee || item.admit_card_fee || 0);
 
-    let voiceFeeList = [];
-    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ${mTotal} रुपये`);
-    if (admFee > 0) voiceFeeList.push(`प्रवेश शुल्क ${admFee} रुपये`);
-    if (regFee > 0) voiceFeeList.push(`पंजीकरण शुल्क ${regFee} रुपये`);
-    if (chgFee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ${chgFee} रुपये`);
-    if (halfFee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ${halfFee} रुपये`);
-    if (annuFee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ${annuFee} रुपये`);
-    if (pracFee > 0) voiceFeeList.push(`प्रैक्टिकल फीस ${pracFee} रुपये`);
-    if (boardFee > 0) voiceFeeList.push(`बोर्ड परीक्षा शुल्क ${boardFee} रुपये`);
-    if (admitFee > 0) voiceFeeList.push(`एडमिट कार्ड शुल्क ${admitFee} रुपये`);
+                    let grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || (mTotal + admFee + regFee + chgFee + halfFee + annuFee + pracFee + boardFee + admitFee);
 
-    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
+                    let voiceFeeList = [];
+                    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ${mTotal} रुपये`);
+                    if (admFee > 0) voiceFeeList.push(`प्रवेश शुल्क ${admFee} रुपये`);
+                    if (regFee > 0) voiceFeeList.push(`पंजीकरण शुल्क ${regFee} रुपये`);
+                    if (chgFee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ${chgFee} रुपये`);
+                    if (halfFee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ${halfFee} रुपये`);
+                    if (annuFee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ${annuFee} रुपये`);
+                    if (pracFee > 0) voiceFeeList.push(`प्रैक्टिकल फीस ${pracFee} रुपये`);
+                    if (boardFee > 0) voiceFeeList.push(`बोर्ड परीक्षा शुल्क ${boardFee} रुपये`);
+                    if (admitFee > 0) voiceFeeList.push(`एडमिट कार्ड शुल्क ${admitFee} रुपये`);
 
-    // 🎙️ 2. गारंटेड वॉइस स्क्रिप्ट (हर हाल में ब्रेकडाउन + अंत में ग्रैंड टोटल बोलेगा)
-    let voiceScript = "";
-    const sName = item.studentName || item.name || 'छात्र';
-    const cName = item.className || item.class || '-';
+                    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
+                    const sName = item.studentName || item.name || 'छात्र';
+                    const cName = item.className || item.class || '-';
 
-    if (isPromo) {
-        voiceScript = `नमस्कार! जे आर डी पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${sName} को अगली कक्षा ${cName} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की हार्दिक शुभकामनाएँ!`;
-    } else {
-        voiceScript = `नमस्कार! जे आर डी PUBLIC SCHOOL मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${sName} का कक्षा ${cName} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की ढेरों शुभकामनाएँ!`;
-    }
+                    let voiceScript = isPromo
+                        ? `नमस्कार! जे आर डी पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${sName} को अगली कक्षा ${cName} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की हार्दिक शुभकामनाएँ!`
+                        : `नमस्कार! जे आर डी PUBLIC SCHOOL मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${sName} का कक्षा ${cName} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की ढेरों शुभकामनाएँ!`;
 
-    console.log("🎙️ Generated Voice Script:", voiceScript);
+                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                    if (audioBuffer) {
+                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                    }
 
-    // 🎙️ 3. ऑडियो वॉइस नोट जनरेट करना
-    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                        await new Promise(res => setTimeout(res, 1500));
+                    }
 
-    if (audioBuffer) {
-        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-        console.log("✅ वॉइस नोट व्हाट्सएप पर भेज दिया गया!");
-    }
+                    await sendAdmissionOrPromotionPdf(jid, item);
+                }
 
-    // 💬 4. व्हाट्सएप मुख्य टेक्स्ट मैसेज
-    if (item.message && item.message.trim().length > 0) {
-        await sock.sendMessage(jid, { text: item.message });
-        await new Promise(res => setTimeout(res, 2000));
-    }
+                // 🎯 C. FEE PAYMENT RECEIPT
+                else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
+                    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
+                    let studentNameClean = item.name || item.studentName || 'छात्र';
+                    let paidAmount = item.paid || item.amount || 0;
 
-    // 📄 5. A4 PDF बनाना और भेजना
-    await sendAdmissionOrPromotionPdf(jid, item);
-}
+                    let breakdownList = Array.isArray(item.breakdown) ? item.breakdown : [];
+                    let voiceFeeList = [];
+                    let textItems = [];
 
-               // 🎯 C. FEE PAYMENT RECEIPT (Text + Dynamic Breakdown Voice + PDF Combo)
-else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
-    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
-    let studentNameClean = item.name || item.studentName || 'छात्र';
-    let paidAmount = item.paid || item.amount || 0;
-    
-    // 📊 मदवार विवरण (Fee Breakdown) टेक्स्ट व वॉइस के लिए तैयार करना
-    let breakdownList = Array.isArray(item.breakdown) ? item.breakdown : [];
-    let voiceFeeList = [];
-    let textItems = [];
+                    if (breakdownList.length > 0) {
+                        breakdownList.forEach(b => {
+                            let amt = parseFloat(b.received || b.amount || 0);
+                            if (amt > 0) {
+                                let labelName = b.label || 'शुल्क';
+                                voiceFeeList.push(`${labelName} ${amt} रुपये`);
+                                textItems.push(`• *${labelName}:* ₹${amt}/-`);
+                            }
+                        });
+                    }
 
-    if (breakdownList.length > 0) {
-        breakdownList.forEach(b => {
-            let amt = parseFloat(b.received || b.amount || 0);
-            if (amt > 0) {
-                let labelName = b.label || 'शुल्क';
-                voiceFeeList.push(`${labelName} ${amt} रुपये`);
-                textItems.push(`• *${labelName}:* ₹${amt}/-`);
+                    let textBreakdownDetails = textItems.length > 0 ? textItems.join('\n') : (cleanDet || `• *फीस जमा:* ₹${paidAmount}/-`);
+                    let voiceBreakdownText = voiceFeeList.length > 0 ? "जमा की गई मदों का विवरण इस प्रकार है: " + voiceFeeList.join(', ') + "। " : "";
+
+                    let textToSend = item.message || `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* *${studentNameClean}*\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* \`${item.rid || 'N/A'}\` \n💰 *कुल जमा राशि:* ₹${paidAmount}/-\n\n📊 *जमा फीस मदवार विवरण (Fee Breakdown):*\n${textBreakdownDetails}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की डिजिटल PDF रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+
+                    await sock.sendMessage(jid, { text: textToSend });
+                    await new Promise(res => setTimeout(res, 1200));
+
+                    let voiceScript = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई में आपके प्रिय बच्चे ${studentNameClean} की कुल ${paidAmount} रुपये फीस सफलतापूर्वक जमा कर ली गई है। ${voiceBreakdownText}डिजिटल रसीद एवं बहीखाता विवरण संदेश में नीचे संलग्न है। धन्यवाद!`;
+                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                    if (audioBuffer) {
+                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                    }
+
+                    await new Promise(res => setTimeout(res, 1200));
+                    await sendFeePdfReceipt(jid, item);
+                }
+
+                // 🎯 D. GENERAL MESSAGES
+                else {
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                    }
+                    if (item.voiceText && item.voiceText.trim().length > 0) {
+                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+                        if (audioBuffer) {
+                            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                        }
+                    }
+                }
             }
-        });
-    }
-
-    let textBreakdownDetails = textItems.length > 0 ? textItems.join('\n') : (cleanDet || `• *फीस जमा:* ₹${paidAmount}/-`);
-    let voiceBreakdownText = voiceFeeList.length > 0 ? "जमा की गई मदों का विवरण इस प्रकार है: " + voiceFeeList.join(', ') + "। " : "";
-
-    // 💬 व्हाट्सएप मुख्य टेक्स्ट संदेश
-    let textToSend = item.message;
-    if (!textToSend || textToSend.trim() === '') {
-        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* *${studentNameClean}*\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* \`${item.rid || 'N/A'}\` \n💰 *कुल जमा राशि:* ₹${paidAmount}/-\n\n📊 *जमा फीस मदवार विवरण (Fee Breakdown):*\n${textBreakdownDetails}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की डिजिटल PDF रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
-    }
-
-    // 1. पहले टेक्स्ट SMS भेजें
-    await sock.sendMessage(jid, { text: textToSend });
-    await new Promise(res => setTimeout(res, 1200));
-
-    // 2. AI HD डायनामिक वॉइस नोट (मदवार स्पष्ट आवाज में)
-    let voiceScript = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई में आपके प्रिय बच्चे ${studentNameClean} की कुल ${paidAmount} रुपये फीस सफलतापूर्वक जमा कर ली गई है। ${voiceBreakdownText}डिजिटल रसीद एवं बहीखाता विवरण संदेश में नीचे संलग्न है। धन्यवाद!`;
-    
-    try {
-        const audioBuffer = await generateHindiVoiceNote(voiceScript);
-        if (audioBuffer) {
-            await sock.sendMessage(jid, {
-                audio: audioBuffer,
-                mimetype: 'audio/ogg; codecs=opus',
-                ptt: true
-            });
-        }
-    } catch (vErr) {
-        console.error("❌ वॉइस नोट जनरेशन में एरर:", vErr.message);
-    }
-
-    await new Promise(res => setTimeout(res, 1200));
-
-    // 3. ब्रांडेड PDF रसीद भेजें
-    try {
-        await sendFeePdfReceipt(jid, item);
-    } catch (pErr) {
-        console.error("❌ PDF भेजने में एरर:", pErr.message);
-    }
-}
-
-// 🎯 D. GENERAL TEXT MESSAGES (अन्य सामान्य संदेशों के लिए)
-else {
-    if (item.message && item.message.trim().length > 0) {
-        await sock.sendMessage(jid, { text: item.message });
-    }
-    if (item.voiceText && item.voiceText.trim().length > 0) {
-        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
-        if (audioBuffer) {
-            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+        } catch (err) {
+            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+        } finally {
+            messageQueue.shift();
+            await new Promise(res => setTimeout(res, 2000));
         }
     }
+    isProcessingQueue = false;
 }
 
-        messageQueue.shift();
-    } else {
-        await new Promise(res => setTimeout(res, 2000));
-        break;
-    }
-
-    await new Promise(res => setTimeout(res, 2500));
-
-} catch (err) {
-    console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
-    messageQueue.shift();
-}
-}
-
-isProcessingQueue = false;
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -1024,7 +1011,6 @@ app.post('/enqueue-message', (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
     }
 
-    // 🎯 सुरक्षित नेस्टेड पेलोड मैपिंग (बिना किसी पुराने फ़ील्ड को हटाए)
     const stData = body.studentData || {};
     const fStruct = body.feeStructure || {};
 
@@ -1043,11 +1029,10 @@ app.post('/enqueue-message', (req, res) => {
         enroll: body.enroll || stData.enroll || body.scholarNo || '',
         fatherName: body.fatherName || body.father || stData.father || '',
         motherName: body.motherName || body.mother || stData.mother || '',
-        admissionDate: body.admissionDate || body.admission_date || '',
         studentType: body.studentType || body.student_type || body.status || stData.type || 'REGULAR',
         paid: body.paid || body.amount || 0,
         totalAmount: body.totalAmount || fStruct.grand_total || fStruct.total_amount || 0,
-        feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body, // 🎯 Z-Engine फीस ऑब्जेक्ट
+        feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body,
         voiceText: body.voiceText || '',
         upiLink: body.upiLink || '',
         qrUrl: body.qrUrl || '',
@@ -1079,9 +1064,10 @@ app.post('/send-whatsapp', async (req, res) => {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
+
 app.get('/qr', (req, res) => {
     if (isBotReady) {
-        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP बोट व्हाट्सएप से कनेक्टेड है!</h2>');
+        return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP व्हाट्सएप बोट कनेक्टेड है!</h2>');
     }
     if (!currentQrCode) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">QR Code तैयार हो रहा है... कृपया 3 सेकंड बाद Refresh करें।</h2>');
@@ -1104,7 +1090,7 @@ app.get('/reset-qr', (req, res) => {
     isConnecting = false;
     currentQrCode = '';
     setTimeout(() => startBot(), 1000);
-    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! 3 सेकंड बाद <a href="/qr">/qr पेज खोलें</a>।</h2>');
+    res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px;">🧹 पुराना सेशन साफ़ कर दिया गया है! <a href="/qr">/qr पेज खोलें</a>।</h2>');
 });
 
 app.get('/clear-lid-cache', (req, res) => {
@@ -1112,17 +1098,14 @@ app.get('/clear-lid-cache', (req, res) => {
         if (fs.existsSync(LID_MAP_FILE)) {
             fs.unlinkSync(LID_MAP_FILE);
             lidPhoneMap = {};
-            return res.send('✅ LID cache cleared. Purani galat mappings hat gayi.');
+            return res.send('✅ LID cache cleared.');
         }
-        res.send('ℹ️ Cache file already khali/absent hai.');
+        res.send('ℹ️ Cache file already absent.');
     } catch (e) {
         res.status(500).send('❌ Error: ' + e.message);
     }
 });
 
-// =========================================================================
-// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CLEAN SINGLE VERSION)
-// =========================================================================
 app.get('/', (req, res) => {
     res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
 });
@@ -1132,18 +1115,18 @@ app.listen(PORT, () => {
     console.log(`JRD VIP ERP Bot running on port ${PORT}`);
 });
 
-// बोट स्टार्ट करें
 startBot();
 
-// ⚡ सेल्फ-पिंग इंटरवल (Railway सर्वर को एक्टिव रखने के लिए)
+// ⚡ Self-Ping Interval (Railway सर्वर को एक्टिव रखने हेतु)
 setInterval(() => {
-    https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
+    https.get('https://jrd-whatsapp-bot-production.up.railway.app/', () => {
         console.log('⚡ Self-Ping successful');
     }).on('error', (err) => {
         console.error('❌ Self-Ping error:', err.message);
     });
 }, 4 * 60 * 1000);
-// 🎙️ 🎯 TEACHER & STUDENT LIVE ATTENDANCE WITH HINDI AI VOICE NOTE (PREMIUM)
+
+// 🎙️ TEACHER & STUDENT LIVE ATTENDANCE API WITH 1-31 QUOTES
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile;
@@ -1179,75 +1162,6 @@ app.post('/send-attendance', async (req, res) => {
     });
 
     const dayOfMonth = new Date().getDate();
-
-    const inQuotes = {
-        1: "एक नए महीने की शुरुआत! आइए, नए संकल्पों के साथ बच्चों के भविष्य को उज्ज्वल बनाएं।",
-        2: "शिक्षक वह दीप है जो स्वयं जलकर दूसरों के जीवन को आलोकित करता है। आपका स्वागत है!",
-        3: "आप केवल विषय नहीं पढ़ाते, आप देश के भावी नागरिकों का निर्माण करते हैं। शुभ प्रभात!",
-        4: "ज्ञान बांटना ही संसार का सबसे महान कार्य है। आपकी मेहनत से कई सपने साकार हो रहे हैं!",
-        5: "सफल शिक्षक वह है जो बच्चों में सीखने की जिज्ञासा जगाए। आइए, आज कुछ नया सिखाएं!",
-        6: "आपकी एक मुस्कान और मार्गदर्शन से किसी बच्चे का पूरा दिन बदल सकता है। शुभ प्रभात!",
-        7: "शिक्षा की जड़े कड़वी होती हैं, पर उसका फल बहुत मीठा होता है। आपकी लगन को नमन!",
-        8: "उत्कृष्टता कोई कार्य नहीं, बल्कि एक आदत है। आज फिर एक नई ऊर्जा के साथ शुरुआत करें!",
-        9: "सकारात्मक सोच और निष्ठा से किया गया अध्यापन हमेशा अमर रहता है। आपका दिन शुभ हो!",
-        10: "बच्चों के मन में ज्ञान का बीज बोना ही शिक्षक का असली सौभाग्य है। कर्मभूमि में स्वागत है!",
-        11: "धैर्य और लगन ही एक महान शिक्षक की पहचान है। आपकी उपस्थिति हमारे लिए गर्व की बात है!",
-        12: "सच्चा शिक्षक वह है जो बच्चे को उसके भीतर की क्षमता का अहसास कराए। शुभ प्रभात!",
-        13: "शिक्षा ही वह सबसे शक्तिशाली हथियार है जिससे दुनिया को बदला जा सकता है। जय हिंद!",
-        14: "ज्ञान का दान ही सबसे बड़ा दान है। आज पूरी निष्ठा से अपने दायित्व का निर्वहन करें!",
-        15: "महीने का मध्य! अपनी उसी अटूट ऊर्जा और उत्साह के साथ बच्चों का मार्गदर्शन करते रहें।",
-        16: "शिक्षकों के मार्गदर्शन के बिना सफलता का कोई भी मुकाम हासिल नहीं किया जा सकता।",
-        17: "आपकी मेहनत हर दिन एक नए भारत की नींव रख रही है। आपका आज का दिन मंगलमय हो!",
-        18: "शिक्षा केवल अक्षर ज्ञान नहीं, बल्कि चरित्र का निर्माण है। शुभ प्रभात!",
-        19: "अनुशासन और प्रेम का संतुलन ही एक आदर्श शिक्षक का आभूषण है। आपका स्वागत है!",
-        20: "आपकी दी गई सीख बच्चों के जीवन भर काम आएगी। पूरे उत्साह के साथ कार्य प्रारंभ करें!",
-        21: "विद्या ही परम धन है और आप उस धन के संरक्षक हैं। आपका दिन ऊर्जा से भरपूर रहे!",
-        22: "एक अच्छा शिक्षक एक प्रकाशस्तंभ की तरह है जो भटकते हुए जहाजों को राह दिखाता है।",
-        23: "महान कार्य करने का एक ही तरीका है कि आप अपने काम से प्यार करें। शुभ प्रभात!",
-        24: "ज्ञान की ज्योति कभी बुझती नहीं। आपकी लगन से बच्चों का जीवन हमेशा जगमगाएगा।",
-        25: "बच्चों के सपनों को पंख देने के इस पावन कार्य में आपका पुनः हार्दिक स्वागत है!",
-        26: "हर बच्चा एक खास प्रतिभा लेकर आता है, उसे पहचानने का हुनर आपके पास है।",
-        27: "सफलता का कोई संक्षिप्त रास्ता नहीं होता, आपकी निरंतर मेहनत ही इसका प्रमाण है!",
-        28: "शिक्षक वह सीढ़ी है जो खुद वहीं रहती है, पर दूसरों को ऊंचाइयों पर पहुंचा देती है।",
-        29: "आपकी निष्ठा और समर्पण ही इस विद्यालय की असली ताकत है। शुभ प्रभात!",
-        30: "सिखाने की कला ही एक शिक्षक को महान बनाती है। आज फिर कुछ नया रचें!",
-        31: "महीने का अंतिम दिन! आपके अथक प्रयासों से इस महीने कई नए अध्याय लिखे गए हैं।"
-    };
-
-    const outQuotes = {
-        1: "महीने के पहले दिन आपकी उत्कृष्ट सेवा और मेहनत के लिए धन्यवाद। विश्राम करें और कल पुनः मिलें!",
-        2: "आज दिन भर बच्चों के भविष्य को संवारने में दिए गए योगदान के लिए आभार। आपकी शाम सुखद रहे!",
-        3: "दिन भर की निष्ठापूर्ण अध्यापन सेवा के लिए विद्यालय परिवार आपका धन्यवाद करता है। शुभ संध्या!",
-        4: "राष्ट्र निर्माण के इस पावन कार्य में आज की आपकी लगन अत्यंत सराहनीय रही। धन्यवाद!",
-        5: "एक और सफल कार्य दिवस पूर्ण हुआ! आपके अमूल्य प्रयासों और मार्गदर्शन के लिए हार्दिक धन्यवाद।",
-        6: "आज की आपकी मेहनत से कई बच्चों का जीवन समृद्ध हुआ है। विश्राम करें, शुभ संध्या!",
-        7: "दिन भर की थकान के बाद अब शांतिपूर्ण विश्राम करें। आपके अमूल्य योगदान का आभार!",
-        8: "आपकी निरंतर निष्ठा ही विद्यालय की प्रगति का आधार है। आज के समर्पण के लिए धन्यवाद!",
-        9: "आज का कार्य दिवस सफलतापूर्वक संपन्न हुआ। आपकी लगन को JRD परिवार का नमन!",
-        10: "बच्चों के उज्ज्वल भविष्य की नींव रखने के लिए धन्यवाद। आपकी शाम आनंदमय रहे!",
-        11: "आज दिए गए ज्ञान और संस्कारों के लिए विद्यालय प्रबंधन आपका आभार व्यक्त करता है।",
-        12: "मेहनत रंग लाती है! आज के आपके सराहनीय प्रयासों के लिए हार्दिक धन्यवाद। शुभ संध्या!",
-        13: "दिन भर के उत्कृष्ट अध्यापन के लिए धन्यवाद। विश्राम करें और कल पुनः नई ऊर्जा से मिलें!",
-        14: "ज्ञान के इस पावन यज्ञ में आज की आपकी आहुति के लिए धन्यवाद। आपका समय सुखद हो!",
-        15: "मध्य महीने तक आपकी अटूट सेवा के लिए आभार! विश्राम करें और कल पुनः मिलें।",
-        16: "आज का दिन बहुत ही फलदायी रहा। आपकी निरंतर मेहनत के लिए हार्दिक धन्यवाद!",
-        17: "बच्चों को दिए गए आपके अनमोल समय और ज्ञान के लिए विद्यालय परिवार आभारी है।",
-        18: "आज का कार्य दिवस पूर्ण हुआ। आपकी लगन और निष्ठा के लिए कोटि-कोटि धन्यवाद!",
-        19: "शिक्षकों के समर्पण से ही विद्यालय का नाम रोशन होता है। आज के योगदान के लिए आभार!",
-        20: "आपकी आज की मेहनत से बच्चों ने कुछ नया सीखा है। शुभ संध्या व शांतिपूर्ण रात्रि!",
-        21: "दिन भर की उत्कृष्ट सेवा के लिए JRD परिवार आपका आभार व्यक्त करता है। विश्राम करें!",
-        22: "शिक्षा के प्रति आपकी सच्ची निष्ठा को नमन! आज का कार्य दिवस सफलतापूर्वक पूर्ण हुआ।",
-        23: "बच्चों के सर्वांगीण विकास में आज दिए गए आपके योगदान के लिए हार्दिक धन्यवाद!",
-        24: "एक और प्रेरक दिन संपन्न हुआ! आपकी अटूट मेहनत के लिए धन्यवाद, शुभ संध्या!",
-        25: "ज्ञान बांटने का आज का आपका सफर बहुत ही सराहनीय रहा। विश्राम करें!",
-        26: "आपकी उपस्थिति और मार्गदर्शन ही बच्चों की असली ताकत है। आज के लिए धन्यवाद!",
-        27: "दिन भर की थकान के बाद अब अपने परिवार के साथ सुखद समय बिताएं। आभार!",
-        28: "आपकी निष्ठा से विद्यालय नित नई ऊंचाइयों को छू रहा है। आज की सेवा के लिए धन्यवाद!",
-        29: "सफल कार्य दिवस की बधाई! आपके अमूल्य प्रयासों के लिए विद्यालय परिवार आभारी है।",
-        30: "आज के समर्पित अध्यापन कार्य के लिए धन्यवाद। आपकी शाम सुखद और शांतिपूर्ण रहे!",
-        31: "पूरे महीने आपकी अथक मेहनत और समर्पित सेवा के लिए JRD परिवार आपका हार्दिक आभार व्यक्त करता है!"
-    };
-
     const todayInQuote = inQuotes[dayOfMonth] || inQuotes[1];
     const todayOutQuote = outQuotes[dayOfMonth] || outQuotes[1];
 
@@ -1266,54 +1180,43 @@ app.post('/send-attendance', async (req, res) => {
         if (type === 'TEACHER_ATTENDANCE') {
             if (status === 'ABSENT' || status === 'A') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *अनुपस्थिति सूचना (TEACHER ABSENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी स्थिति **अनुपस्थित (ABSENT)** दर्ज की गई है।\n\n_कृपया अपनी नियमित उपस्थिति बनाए रखें ताकि पठन-पाठन सुचारू रूप से चल सके।_\n━━━━━━━━━━━━━━━━━━━━━━━\n– Er. Sarvesh Verma (Management)`;
-                
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई प्रबंधन द्वारा सूचित किया जाता है कि आज विद्यालय में आपकी स्थिति अनुपस्थित दर्ज की गई है। कृपया नियमित उपस्थिति बनाए रखें। धन्यवाद!`;
-            
             } else if (attType === 'OUT') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n🚩 *शिक्षक प्रस्थान (OUT-TIME)*\n\nआदरणीय *${name}* जी,\n\n🕒 *प्रस्थान समय:* ${cleanTime}\n🏁 *स्थिति:* कार्य दिवस पूर्ण ✅\n\n🌺 *आज का आभार संदेश:*\n_"${todayOutQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-                
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आपका आज का प्रस्थान समय ${cleanTime} बजे सफलतापूर्वक दर्ज कर लिया गया है। ${todayOutQuote} धन्यवाद!`;
-            
             } else if (attType === 'IN') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n📋 *शिक्षक उपस्थिति (IN-TIME)*\n\nआदरणीय *${name}* जी,\nविद्यालय में आपका हार्दिक स्वागत है!\n\n🕒 *आगमन समय:* ${cleanTime}\n✅ *स्थिति:* PRESENT (उपस्थित)\n\n💭 *आज का प्रेरणादायी विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-                
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई परिवार में आपका हार्दिक स्वागत है। आपका आगमन समय ${cleanTime} बजे दर्ज हो गया है। ${todayInQuote} आपका दिन शुभ हो!`;
-            
             } else {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n✅ *उपस्थिति सूचना (PRESENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी उपस्थिति (**PRESENT**) दर्ज कर ली गई है।\n\n💭 *आज का विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-                
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आज आपकी उपस्थिति सफलतापूर्वक दर्ज कर ली गई है। ${todayInQuote} धन्यवाद!`;
             }
         } else {
             const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
             if (isAbsent) {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *उपस्थिति सूचना (ABSENT)*\n\nप्रिय अभिभावक,\nआपका बच्चा *${name}* (कक्षा: ${className}) आज विद्यालय में **अनुपस्थित (ABSENT)** है।\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-                
                 voiceScriptText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि आपका बच्चा ${name}, कक्षा ${className}, आज विद्यालय में अनुपस्थित है। धन्यवाद!`;
             } else {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n✅ *उपस्थिति सूचना (PRESENT)*\n\nप्रिय अभिभावक,\nआपका बच्चा *${name}* (कक्षा: ${className}) आज विद्यालय में **उपस्थित (PRESENT)** है।\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
-                
                 voiceScriptText = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई से सूचित किया जाता है कि आपका बच्चा ${name}, कक्षा ${className}, आज विद्यालय में उपस्थित है। धन्यवाद!`;
             }
         }
 
-        // 🎯 1. पहले व्हाट्सएप टेक्स्ट मैसेज भेजें
         const sent = await sock.sendMessage(jid, { text: messageText });
         if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
 
-        // 🎯 2. फिर भारतीय महिला आवाज (Swara Neural) वाला AI वॉइस नोट जनरेट करके भेजें
-        if (voiceScriptText && typeof generateHindiVoiceNote === 'function') {
+        if (voiceScriptText) {
             try {
                 const audioBuffer = await generateHindiVoiceNote(voiceScriptText);
                 if (audioBuffer) {
                     await sock.sendMessage(jid, {
                         audio: audioBuffer,
                         mimetype: 'audio/ogg; codecs=opus',
-                        ptt: true // WhatsApp Voice Note Style (हरा माइक)
+                        ptt: true
                     });
                 }
             } catch (vErr) {
-                console.error("⚠️ Voice note generation failed:", vErr.message);
+                console.error("⚠️ Voice note issue:", vErr.message);
             }
         }
 
