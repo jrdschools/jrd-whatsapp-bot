@@ -927,51 +927,95 @@ else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONF
     await sendAdmissionOrPromotionPdf(jid, item);
 }
 
-                // 🎯 C. FEE PAYMENT RECEIPT (केवल तभी चलेगा जब वास्तव में भुगतान हुआ हो)
-                else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
-                    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
-                    let textToSend = item.message;
+               // 🎯 C. FEE PAYMENT RECEIPT (Text + Dynamic Breakdown Voice + PDF Combo)
+else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
+    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
+    let studentNameClean = item.name || item.studentName || 'छात्र';
+    let paidAmount = item.paid || item.amount || 0;
+    
+    // 📊 मदवार विवरण (Fee Breakdown) टेक्स्ट व वॉइस के लिए तैयार करना
+    let breakdownList = Array.isArray(item.breakdown) ? item.breakdown : [];
+    let voiceFeeList = [];
+    let textItems = [];
 
-                    if (!textToSend || textToSend.trim() === '') {
-                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* ${item.name || item.studentName || 'N/A'}\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* ${item.rid || 'N/A'}\n💰 *कुल जमा राशि:* ₹${item.paid || 0}/-\n\n📊 *मदवार विवरण / Breakdown:*\n${cleanDet}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की पीडीएफ (PDF) रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
-                    }
-
-                    await sock.sendMessage(jid, { text: textToSend });
-                    await new Promise(res => setTimeout(res, 1500));
-                    await sendFeePdfReceipt(jid, item);
-                    await new Promise(res => setTimeout(res, 1500));
-                    await sendFeeVoiceNote(jid, item);
-                }
-
-                // 🎯 D. GENERAL TEXT MESSAGES (बिना किसी ऑटो फीस रसीद या वॉइस के)
-                else {
-                    if (item.message && item.message.trim().length > 0) {
-                        await sock.sendMessage(jid, { text: item.message });
-                    }
-                    if (item.voiceText && item.voiceText.trim().length > 0) {
-                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
-                        if (audioBuffer) {
-                            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-                        }
-                    }
-                }
-
-                messageQueue.shift();
-            } else {
-                await new Promise(res => setTimeout(res, 2000));
-                break;
+    if (breakdownList.length > 0) {
+        breakdownList.forEach(b => {
+            let amt = parseFloat(b.received || b.amount || 0);
+            if (amt > 0) {
+                let labelName = b.label || 'शुल्क';
+                voiceFeeList.push(`${labelName} ${amt} रुपये`);
+                textItems.push(`• *${labelName}:* ₹${amt}/-`);
             }
-
-            await new Promise(res => setTimeout(res, 2500));
-
-        } catch (err) {
-            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
-            messageQueue.shift();
-        }
+        });
     }
 
-    isProcessingQueue = false;
+    let textBreakdownDetails = textItems.length > 0 ? textItems.join('\n') : (cleanDet || `• *फीस जमा:* ₹${paidAmount}/-`);
+    let voiceBreakdownText = voiceFeeList.length > 0 ? "जमा की गई मदों का विवरण इस प्रकार है: " + voiceFeeList.join(', ') + "। " : "";
+
+    // 💬 व्हाट्सएप मुख्य टेक्स्ट संदेश
+    let textToSend = item.message;
+    if (!textToSend || textToSend.trim() === '') {
+        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* *${studentNameClean}*\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* \`${item.rid || 'N/A'}\` \n💰 *कुल जमा राशि:* ₹${paidAmount}/-\n\n📊 *जमा फीस मदवार विवरण (Fee Breakdown):*\n${textBreakdownDetails}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की डिजिटल PDF रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+    }
+
+    // 1. पहले टेक्स्ट SMS भेजें
+    await sock.sendMessage(jid, { text: textToSend });
+    await new Promise(res => setTimeout(res, 1200));
+
+    // 2. AI HD डायनामिक वॉइस नोट (मदवार स्पष्ट आवाज में)
+    let voiceScript = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई में आपके प्रिय बच्चे ${studentNameClean} की कुल ${paidAmount} रुपये फीस सफलतापूर्वक जमा कर ली गई है। ${voiceBreakdownText}डिजिटल रसीद एवं बहीखाता विवरण संदेश में नीचे संलग्न है। धन्यवाद!`;
+    
+    try {
+        const audioBuffer = await generateHindiVoiceNote(voiceScript);
+        if (audioBuffer) {
+            await sock.sendMessage(jid, {
+                audio: audioBuffer,
+                mimetype: 'audio/ogg; codecs=opus',
+                ptt: true
+            });
+        }
+    } catch (vErr) {
+        console.error("❌ वॉइस नोट जनरेशन में एरर:", vErr.message);
+    }
+
+    await new Promise(res => setTimeout(res, 1200));
+
+    // 3. ब्रांडेड PDF रसीद भेजें
+    try {
+        await sendFeePdfReceipt(jid, item);
+    } catch (pErr) {
+        console.error("❌ PDF भेजने में एरर:", pErr.message);
+    }
 }
+
+// 🎯 D. GENERAL TEXT MESSAGES (अन्य सामान्य संदेशों के लिए)
+else {
+    if (item.message && item.message.trim().length > 0) {
+        await sock.sendMessage(jid, { text: item.message });
+    }
+    if (item.voiceText && item.voiceText.trim().length > 0) {
+        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+        if (audioBuffer) {
+            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+        }
+    }
+}
+
+        messageQueue.shift();
+    } else {
+        await new Promise(res => setTimeout(res, 2000));
+        break;
+    }
+
+    await new Promise(res => setTimeout(res, 2500));
+
+} catch (err) {
+    console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+    messageQueue.shift();
+}
+}
+
+isProcessingQueue = false;
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
