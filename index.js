@@ -980,7 +980,55 @@ async function processQueue() {
                     await sendFeePdfReceipt(jid, item);
                 }
 
-                // 🎯 D. GENERAL MESSAGES
+                // 🎯 D. TEACHER WELCOME (TEXT + SWARA AI VOICE + JOINING LETTER PDF)
+                else if (item.type === 'TEACHER_WELCOME' || item.action === 'save_teacher') {
+                    // 1. टेक्स्ट मैसेज भेजें
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                        await new Promise(res => setTimeout(res, 1200));
+                    }
+
+                    // 2. Swara AI वॉइस नोट (URL या ऑन-द-फ़्लाई TTS)
+                    let audioBuffer = null;
+                    if (item.audio_url && item.audio_url.startsWith('http')) {
+                        try {
+                            const audioRes = await axios.get(item.audio_url, { responseType: 'arraybuffer', timeout: 10000 });
+                            audioBuffer = Buffer.from(audioRes.data);
+                        } catch (e) {
+                            console.error("⚠️ ऑनलाइन ऑडियो डाउनलोड फेल, स्वरा TTS से जनरेट किया जा रहा है...");
+                        }
+                    }
+
+                    if (!audioBuffer && item.message) {
+                        const scriptText = `नमस्ते! आदरणीय ${item.name || 'शिक्षक'} जी, जानकी बाल शिक्षा निकेतन परिवार में आपका हार्दिक स्वागत है। आपकी लॉगिन आईडी और जॉइनिंग लेटर संदेश में नीचे भेजा जा रहा है। धन्यवाद!`;
+                        audioBuffer = await generateHindiVoiceNote(scriptText);
+                    }
+
+                    if (audioBuffer) {
+                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                        await new Promise(res => setTimeout(res, 1500));
+                    }
+
+                    // 3. 📄 Joining Letter PDF डाउनलोड करके प्रेषित करें
+                    if (item.pdf_url && item.pdf_url.startsWith('http')) {
+                        try {
+                            const pdfRes = await axios.get(item.pdf_url, { responseType: 'arraybuffer', timeout: 15000 });
+                            const pdfBuffer = Buffer.from(pdfRes.data);
+
+                            await sock.sendMessage(jid, {
+                                document: pdfBuffer,
+                                mimetype: 'application/pdf',
+                                fileName: item.filename || `Joining_Letter_${item.name || 'Teacher'}.pdf`,
+                                caption: `📄 *J.R.D. PUBLIC SCHOOL*\nآदरणीय *${item.name || 'शिक्षक'}* जी का आधिकारिक नियुक्ति पत्र (Joining Letter)।`
+                            });
+                            console.log(`✅ Teacher Joining PDF (${item.name}) सफलतापूर्वक भेजा गया!`);
+                        } catch (pErr) {
+                            console.error("❌ Teacher PDF डाउनलोड/सेंड करने में त्रुटि:", pErr.message);
+                        }
+                    }
+                }
+
+                // 🎯 E. GENERAL MESSAGES
                 else {
                     if (item.message && item.message.trim().length > 0) {
                         await sock.sendMessage(jid, { text: item.message });
@@ -1019,7 +1067,7 @@ app.post('/enqueue-message', (req, res) => {
         message: body.message || "",
         type: body.type || body.action || 'GENERAL',
         action: body.action || body.type || '',
-        name: body.name || body.student_name || body.studentName || stData.name || '',
+        name: body.name || body.teacher_name || body.student_name || body.studentName || stData.name || '',
         studentName: body.studentName || body.name || body.student_name || stData.name || '',
         className: body.className || body.class || stData.class || '',
         fromClass: body.fromClass || body.from_class || stData.from_class || '',
@@ -1034,6 +1082,10 @@ app.post('/enqueue-message', (req, res) => {
         totalAmount: body.totalAmount || fStruct.grand_total || fStruct.total_amount || 0,
         feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body,
         voiceText: body.voiceText || '',
+        // 🟢 टीचर वेलकम ऑडियो और पीडीएफ हेतु जोड़े गए पैरामीटर्स
+        audio_url: body.audio_url || body.voice_url || '',
+        pdf_url: body.pdf_url || body.document_url || '',
+        filename: body.filename || body.pdf_name || `Joining_Letter_${body.teacher_id || 'Teacher'}.pdf`,
         upiLink: body.upiLink || '',
         qrUrl: body.qrUrl || '',
         details: body.details || '',
