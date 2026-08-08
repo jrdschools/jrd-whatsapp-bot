@@ -980,7 +980,7 @@ async function processQueue() {
                     await sendFeePdfReceipt(jid, item);
                 }
 
-                // 🎯 D. TEACHER WELCOME (TEXT + SWARA AI VOICE + GUARANTEED JOINING LETTER PDF)
+                // 🎯 D. TEACHER WELCOME (TEXT + SWARA AI VOICE + 100% BRANDED OFFICIAL JOINING LETTER PDF)
                 else if (item.type === 'TEACHER_WELCOME' || item.action === 'save_teacher') {
                     // 1. टेक्स्ट मैसेज भेजें
                     if (item.message && item.message.trim().length > 0) {
@@ -988,7 +988,7 @@ async function processQueue() {
                         await new Promise(res => setTimeout(res, 1200));
                     }
 
-                    // 2. Swara AI वॉइस नोट (URL या ऑन-द-फ़्लाई TTS)
+                    // 2. Swara AI वॉइस नोट
                     let audioBuffer = null;
                     if (item.audio_url && item.audio_url.startsWith('http')) {
                         try {
@@ -999,12 +999,12 @@ async function processQueue() {
                             });
                             audioBuffer = Buffer.from(audioRes.data);
                         } catch (e) {
-                            console.error("⚠️ ऑनलाइन ऑडियो डाउनलोड फेल, स्वरा TTS से जनरेट किया जा रहा है...");
+                            console.error("⚠️ ऑनलाइन ऑडियो डाउनलोड फेल, स्वरा TTS से नया बना रहे हैं...");
                         }
                     }
 
                     if (!audioBuffer) {
-                        const scriptText = `नमस्ते! आदरणीय ${item.name || 'शिक्षक'} जी, जानकी बाल शिक्षा निकेतन परिवार में आपका हार्दिक स्वागत एवं अभिनंदन है। आपकी लॉगिन आईडी और आधिकारिक जॉइनिंग लेटर संदेश में नीचे भेजा जा रहा है। धन्यवाद!`;
+                        const scriptText = `नमस्ते! आदरणीय ${item.name || 'शिक्षक'} जी, जानकी बाल शिक्षा निकेतन परिवार में आपका हार्दिक स्वागत एवं अभिनंदन है। आपकी लॉगिन आईडी, पासवर्ड और आधिकारिक नियुक्ति पत्र संदेश में नीचे भेजा जा रहा है। धन्यवाद!`;
                         audioBuffer = await generateHindiVoiceNote(scriptText);
                     }
 
@@ -1013,11 +1013,11 @@ async function processQueue() {
                         await new Promise(res => setTimeout(res, 1500));
                     }
 
-                    // 3. 📄 100% Guaranteed Joining Letter PDF Builder & Sender
+                    // 3. 📄 100% BRANDED HIGH-QUALITY OFFICIAL JOINING LETTER PDF
                     try {
                         let pdfBuffer = null;
 
-                        // यदि PHP URL दिया है तो सुरक्षित तरीके से डाउनलोड करने का प्रयास करें
+                        // यदि PHP URL दिया है तो डाउनलोड करने का प्रयास करें
                         if (item.pdf_url && item.pdf_url.startsWith('http')) {
                             try {
                                 const pdfRes = await axios.get(item.pdf_url, { 
@@ -1025,19 +1025,16 @@ async function processQueue() {
                                     timeout: 12000,
                                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
                                 });
-                                // चेक करें कि कहीं HTML एरर पेज तो नहीं आया (PDF का मैजिक नंबर %PDF होना चाहिए)
                                 const downloadedBuf = Buffer.from(pdfRes.data);
                                 if (downloadedBuf.toString('utf8', 0, 4) === '%PDF') {
                                     pdfBuffer = downloadedBuf;
-                                } else {
-                                    console.error("⚠️ PHP से डाउनलोड हुआ रिस्पॉन्स वैध PDF नहीं है (HTML Page)।");
                                 }
                             } catch (dErr) {
-                                console.error("⚠️ PHP URL से PDF डाउनलोड नहीं हो पाया, ऑटो-जनरेटर यूज़ हो रहा है...");
+                                console.log("⚠️ PHP URL से PDF डाउनलोड नहीं हो पाया, ऑटो-जनरेटर यूज़ हो रहा है...");
                             }
                         }
 
-                        // यदि PHP से PDF न मिला हो, तो Node.js खुद ही A4 Size Branded Joining PDF बनाएगा
+                        // यदि PHP से PDF न मिले, तो Node.js खुद Branded A4 Official Joining Letter बनाएगा
                         if (!pdfBuffer) {
                             pdfBuffer = await new Promise((resolve) => {
                                 const doc = new PDFDocument({ size: 'A4', margin: 30 });
@@ -1045,44 +1042,91 @@ async function processQueue() {
                                 doc.on('data', buffers.push.bind(buffers));
                                 doc.on('end', () => resolve(Buffer.concat(buffers)));
 
-                                const mainColor = '#1A365D';
+                                const mainColor = '#1A365D'; // डार्क नेवी ब्लू
+                                const todayDate = new Date().toLocaleDateString('en-IN', {
+                                    timeZone: 'Asia/Kolkata',
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric'
+                                });
 
-                                // बॉर्डर और हेडर
+                                const teacherName = item.name || item.studentName || 'Teacher';
+                                const teacherId = item.teacher_id || item.teacherId || item.scholarNo || 'N/A';
+                                const teacherPass = item.password || 'jrd123';
+                                const teacherClass = item.className || item.class_assigned || item.class || 'Class 10';
+                                const teacherSub = item.subject || 'General';
+                                const teacherDesig = item.designation || 'Teacher';
+                                const teacherPhone = item.number || item.phone || 'N/A';
+
+                                // 🏛️ 1. वाटरमार्क
+                                doc.save();
+                                doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
+                                doc.fillColor(mainColor).fillOpacity(0.03).fontSize(38).font('Helvetica-Bold');
+                                doc.text('J.R.D. PUBLIC SCHOOL', doc.page.width / 2 - 220, doc.page.height / 2 - 20, { align: 'center' });
+                                doc.restore();
+
+                                // 🏛️ 2. डबल बॉर्डर
                                 doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).strokeColor(mainColor).stroke();
+                                doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).strokeColor(mainColor).stroke();
+
+                                // 🏛️ 3. स्कूल हेडर
                                 doc.rect(25, 25, doc.page.width - 50, 65).fillColor(mainColor).fill();
                                 doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 34, { align: 'center' });
                                 doc.fontSize(8.5).font('Helvetica').text('Gram & Post - Marui, Cholapur, Varanasi (U.P.) - 221208', 25, 59, { align: 'center' });
+                                doc.fontSize(8).font('Helvetica-Bold').text('UDISE CODE: 09670804504 | BOARD: BASIC SHIKSHA PARISHAD U.P.', 25, 71, { align: 'center' });
 
-                                // टाइटल
+                                // 🏛️ 4. बैंड टाइटल
                                 doc.rect(25, 100, doc.page.width - 50, 24).fillColor('#F1F5F9').fill();
-                                doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text('OFFICIAL TEACHER APPOINTMENT & JOINING LETTER', 25, 107, { align: 'center' });
+                                doc.fillColor(mainColor).fontSize(10.5).font('Helvetica-Bold').text('OFFICIAL TEACHER APPOINTMENT & JOINING LETTER', 25, 107, { align: 'center' });
 
-                                // टीचर विवरण
-                                let rowY = 145;
-                                const drawTeacherRow = (label, val) => {
-                                    doc.font('Helvetica-Bold').fontSize(10).fillColor('#475569').text(label, 40, rowY);
-                                    doc.font('Helvetica-Bold').fontSize(10).fillColor('#0F172A').text(safePdfText(val, 'N/A'), 220, rowY);
-                                    doc.moveTo(35, rowY + 18).lineTo(doc.page.width - 35, rowY + 18).strokeColor('#E2E8F0').stroke();
-                                    rowY += 26;
+                                // 🏛️ 5. टीचर इंफॉर्मेशन टेबल ग्रिड
+                                const gridTop = 135;
+                                doc.rect(25, gridTop, doc.page.width - 50, 185).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
+
+                                let rowY = gridTop + 8;
+                                const drawRow = (label, value, isBoldVal = false) => {
+                                    doc.font('Helvetica-Bold').fontSize(9).fillColor('#475569').text(label, 35, rowY);
+                                    doc.font(isBoldVal ? 'Helvetica-Bold' : 'Helvetica').fontSize(9.5).fillColor(isBoldVal ? mainColor : '#0F172A').text(safePdfText(value, 'N/A'), 220, rowY);
+                                    doc.moveTo(25, rowY + 15).lineTo(doc.page.width - 25, rowY + 15).strokeColor('#E2E8F0').stroke();
+                                    rowY += 21;
                                 };
 
-                                drawTeacherRow('Teacher Full Name :', item.name || item.studentName);
-                                drawTeacherRow('Teacher ID / Username :', item.teacher_id || item.scholarNo);
-                                drawTeacherRow('Assigned Class :', item.className || item.class_assigned || 'Class 10');
-                                drawTeacherRow('Designation / Post :', item.designation || 'Teacher');
-                                drawTeacherRow('Subject Assigned :', item.subject || 'General');
+                                drawRow('Teacher Full Name :', teacherName, true);
+                                drawRow('Teacher ID / Username :', teacherId, true);
+                                drawRow('Login Password :', teacherPass, true);
+                                drawRow('Assigned Class :', teacherClass, true);
+                                drawRow('Subject Assigned :', teacherSub);
+                                drawRow('Designation / Post :', teacherDesig);
+                                drawRow('Contact Number :', teacherPhone);
+                                drawRow('Date of Joining :', todayDate);
 
-                                // संदेश और नियम
-                                doc.fillColor('#334155').fontSize(10).font('Helvetica').text(
-                                    `Dear ${safePdfText(item.name, 'Teacher')},\n\nWe are pleased to appoint you at J.R.D. Public School. We trust that your knowledge and dedication will greatly benefit our students.\n\nPlease log in to your Teacher Portal (https://jrdschool.in) using your credentials to manage class attendance and academic records.`,
-                                    40, rowY + 15, { width: doc.page.width - 80, align: 'justify' }
+                                // 🏛️ 6. रूल्स एंड गाइडलाइंस सेक्शन
+                                const rulesTop = gridTop + 195;
+                                doc.rect(25, rulesTop, doc.page.width - 50, 20).fillColor(mainColor).fill();
+                                doc.fillColor('#FFFFFF').fontSize(10).font('Helvetica-Bold').text('TEACHER PORTAL GUIDELINES & RESPONSIBILITIES', 35, rulesTop + 5);
+
+                                doc.fillColor('#334155').fontSize(8.5).font('Helvetica');
+                                const rulesText = 
+                                    `1. Attendance & Timetable: Please log in to your Teacher Portal at https://jrdschool.in using your Username and Password.\n` +
+                                    `2. Daily Class Activity: Record student daily attendance, upload homework assignments, and submit exam marks regularly.\n` +
+                                    `3. Code of Conduct: Maintain utmost discipline, academic standards, and moral guidance for student welfare.\n` +
+                                    `4. Official System ID: Keep your login password confidential. Any system activity from your account is your responsibility.`;
+
+                                doc.text(rulesText, 35, rulesTop + 28, { width: doc.page.width - 70, align: 'left', lineGap: 4 });
+
+                                // 🏛️ 7. डिक्लेरेशन और सिग्नेचर
+                                const footerY = doc.page.height - 110;
+                                doc.rect(25, footerY, doc.page.width - 50, 32).fillColor('#F8FAFC').fill();
+                                doc.fillColor('#334155').fontSize(8).font('Helvetica-Oblique').text(
+                                    'Declaration: Welcome to J.R.D. Public School family! We look forward to your valuable contribution towards excellence in education for session 2026-27.',
+                                    32, footerY + 8, { width: doc.page.width - 64, align: 'justify' }
                                 );
 
-                                // सिग्नेचर
-                                const sigY = doc.page.height - 70;
-                                doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
-                                doc.text('Teacher Signature', 40, sigY);
-                                doc.text('Manager / Principal Seal', doc.page.width - 180, sigY, { align: 'right' });
+                                const sigY = doc.page.height - 55;
+                                doc.fillColor('#0F172A').fontSize(8.5).font('Helvetica-Bold');
+                                doc.text('Teacher Signature', 35, sigY);
+                                doc.text('Admission / HR In-Charge', 240, sigY);
+                                doc.text('Principal / Official Seal', doc.page.width - 150, sigY, { align: 'right' });
 
                                 doc.end();
                             });
@@ -1093,9 +1137,9 @@ async function processQueue() {
                             document: pdfBuffer,
                             mimetype: 'application/pdf',
                             fileName: `Joining_Letter_${safePdfText(item.name, 'Teacher')}.pdf`,
-                            caption: `📄 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\nआदरणीय *${item.name || 'शिक्षक'}* जी का आधिकारिक नियुक्ति पत्र (Joining Letter PDF)।`
+                            caption: `🏫 *J.R.D. PUBLIC SCHOOL (MARUI, VARANASI)*\n📄 आदरणीय *${item.name || 'शिक्षक'}* जी का आधिकारिक नियुक्ति पत्र (Joining Letter PDF) संलग्न है।`
                         });
-                        console.log(`✅ Teacher Joining PDF (${item.name}) सफलतापूर्वक भेजा गया!`);
+                        console.log(`✅ Teacher Official Joining PDF (${item.name}) सफलतापूर्वक भेजा गया!`);
 
                     } catch (pErr) {
                         console.error("❌ Teacher PDF बनाने/भेजने में त्रुटि:", pErr.message);
