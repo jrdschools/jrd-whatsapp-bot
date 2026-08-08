@@ -530,6 +530,13 @@ async function sendAdmissionOrPromotionPdf(jid, item) {
     });
 }
 
+// 🛡️ Safe Text Cleanser Function (गार्बेज कैरेक्टर प्रोटेक्शन)
+function safePdfText(val, fallback = 'N/A') {
+    if (!val || val === 'undefined' || val === 'null') return fallback;
+    // केवल एएससीआई (ASCII) और सेफ़ कैरेक्टर्स को रहने दें
+    let cleaned = String(val).replace(/[^\x20-\x7E]/g, '').trim();
+    return cleaned.length > 0 ? cleaned : fallback;
+}
 // 📄 SHARED BRANDED PDF BUILDER (FOR FEE STATEMENTS)
 function buildBrandedFeePdfDoc(doc, data, opts) {
     const headerColor = opts.headerColor || '#1A365D';
@@ -855,152 +862,160 @@ async function processQueue() {
                     await sendFeeReminderPdf(jid, item);
                 }
 
-                // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
-                else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
-                    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
-                    
-                    const fs = item.feeStructure || {};
-                    
-                    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
-                    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
-                    let admFee = parseFloat(fs.admission_fee || item.admission_fee || 0);
-                    let regFee = parseFloat(fs.registration_fee || item.registration_fee || 0);
-                    let chgFee = parseFloat(fs.class_change_fee || item.class_change_fee || 0);
-                    let halfFee = parseFloat(fs.half_yearly_exam_fee || item.half_yearly_exam_fee || 0);
-                    let annuFee = parseFloat(fs.annual_exam_fee || item.annual_exam_fee || 0);
-                    let pracFee = parseFloat(fs.practical_fee || item.practical_fee || 0);
-                    let boardFee = parseFloat(fs.board_fee || item.board_fee || 0);
-                    let admitFee = parseFloat(fs.admit_card_fee || item.admit_card_fee || 0);
+              // 🎯 B. NEW ADMISSION & CLASS PROMOTION CONFIRMATION (Voice + Text + A4 PDF Combo)
+else if (item.type === 'ADMISSION_CONFIRMATION' || item.type === 'PROMOTION_CONFIRMATION' || item.type === 'ADMISSION' || item.action === 'ADMISSION_NOTIFICATION' || item.action === 'addNewAdmission') {
+    const isPromo = item.type === 'PROMOTION_CONFIRMATION' || item.action === 'PROMOTION_CONFIRMATION';
+    
+    // 💰 1. Z-Engine फ़ीस स्ट्रक्चर और ग्रैंड टोटल की सटीक गणना
+    const fs = item.feeStructure || {};
+    
+    let mSingle = parseFloat(fs.monthly_fee || item.monthlyFee || 0);
+    let mTotal = parseFloat(fs.monthly_total || (mSingle * 12) || 0);
+    let admFee = parseFloat(fs.admission_fee || item.admission_fee || 0);
+    let regFee = parseFloat(fs.registration_fee || item.registration_fee || 0);
+    let chgFee = parseFloat(fs.class_change_fee || item.class_change_fee || 0);
+    let halfFee = parseFloat(fs.half_yearly_exam_fee || item.half_yearly_exam_fee || 0);
+    let annuFee = parseFloat(fs.annual_exam_fee || item.annual_exam_fee || 0);
+    let pracFee = parseFloat(fs.practical_fee || item.practical_fee || 0);
+    let boardFee = parseFloat(fs.board_fee || item.board_fee || 0);
+    let admitFee = parseFloat(fs.admit_card_fee || item.admit_card_fee || 0);
 
-                    let calculatedGrandTotal = mTotal + admFee + regFee + chgFee + halfFee + annuFee + pracFee + boardFee + admitFee;
-                    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || calculatedGrandTotal || 0;
+    let calculatedGrandTotal = mTotal + admFee + regFee + chgFee + halfFee + annuFee + pracFee + boardFee + admitFee;
+    const grandTotal = item.totalAmount || fs.grand_total || fs.total_amount || calculatedGrandTotal || 0;
 
-                    let voiceFeeList = [];
-                    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ${mTotal} रुपये`);
-                    if (admFee > 0) voiceFeeList.push(`प्रवेश शुल्क ${admFee} रुपये`);
-                    if (regFee > 0) voiceFeeList.push(`पंजीकरण शुल्क ${regFee} रुपये`);
-                    if (chgFee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ${chgFee} रुपये`);
-                    if (halfFee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ${halfFee} रुपये`);
-                    if (annuFee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ${annuFee} रुपये`);
-                    if (pracFee > 0) voiceFeeList.push(`प्रैक्टिकल फीस ${pracFee} रुपये`);
-                    if (boardFee > 0) voiceFeeList.push(`बोर्ड परीक्षा शुल्क ${boardFee} रुपये`);
-                    if (admitFee > 0) voiceFeeList.push(`एडमिट कार्ड शुल्क ${admitFee} रुपये`);
+    let voiceFeeList = [];
+    if (mTotal > 0) voiceFeeList.push(`वार्षिक शिक्षण शुल्क ${mTotal} रुपये`);
+    if (admFee > 0) voiceFeeList.push(`प्रवेश शुल्क ${admFee} रुपये`);
+    if (regFee > 0) voiceFeeList.push(`पंजीकरण शुल्क ${regFee} रुपये`);
+    if (chgFee > 0) voiceFeeList.push(`कक्षा परिवर्तन शुल्क ${chgFee} रुपये`);
+    if (halfFee > 0) voiceFeeList.push(`छमाही परीक्षा शुल्क ${halfFee} रुपये`);
+    if (annuFee > 0) voiceFeeList.push(`वार्षिक परीक्षा शुल्क ${annuFee} रुपये`);
+    if (pracFee > 0) voiceFeeList.push(`प्रैक्टिकल फीस ${pracFee} रुपये`);
+    if (boardFee > 0) voiceFeeList.push(`बोर्ड परीक्षा शुल्क ${boardFee} रुपये`);
+    if (admitFee > 0) voiceFeeList.push(`एडमिट कार्ड शुल्क ${admitFee} रुपये`);
 
-                    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
+    const feeDescText = voiceFeeList.length > 0 ? voiceFeeList.join(', ') : 'कोई अतिरिक्त शुल्क देय नहीं';
 
-                    let voiceScript = "";
-                    const sName = item.studentName || item.name || 'छात्र';
-                    const cName = item.className || item.class || '-';
+    // 🎙️ 2. गारंटेड वॉइस स्क्रिप्ट (हर हाल में ब्रेकडाउन + अंत में ग्रैंड टोटल बोलेगा)
+    let voiceScript = "";
+    const sName = item.studentName || item.name || 'छात्र';
+    const cName = item.className || item.class || '-';
 
-                    if (isPromo) {
-                        voiceScript = `नमस्कार! जे आर डी पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${sName} को अगली कक्षा ${cName} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की हार्दिक शुभकामनाएँ!`;
-                    } else {
-                        voiceScript = `नमस्कार! जे आर डी PUBLIC SCHOOL मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${sName} का कक्षा ${cName} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की ढेरों शुभकामनाएँ!`;
-                    }
-
-                    console.log("🎙️ Generated Voice Script:", voiceScript);
-
-                    const audioBuffer = await generateHindiVoiceNote(voiceScript);
-
-                    if (audioBuffer) {
-                        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-                        console.log("✅ वॉइस नोट व्हाट्सएप पर भेज दिया गया!");
-                    }
-
-                    if (item.message && item.message.trim().length > 0) {
-                        await sock.sendMessage(jid, { text: item.message });
-                        await new Promise(res => setTimeout(res, 2000));
-                    }
-
-                    await sendAdmissionOrPromotionPdf(jid, item);
-                }
-
-                // 🎯 C. FEE PAYMENT RECEIPT (Text + Dynamic Breakdown Voice + PDF Combo)
-                else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
-                    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
-                    let studentNameClean = item.name || item.studentName || 'छात्र';
-                    let paidAmount = item.paid || item.amount || 0;
-                    
-                    let breakdownList = Array.isArray(item.breakdown) ? item.breakdown : [];
-                    let voiceFeeList = [];
-                    let textItems = [];
-
-                    if (breakdownList.length > 0) {
-                        breakdownList.forEach(b => {
-                            let amt = parseFloat(b.received || b.amount || 0);
-                            if (amt > 0) {
-                                let labelName = b.label || 'शुल्क';
-                                voiceFeeList.push(`${labelName} ${amt} रुपये`);
-                                textItems.push(`• *${labelName}:* ₹${amt}/-`);
-                            }
-                        });
-                    }
-
-                    let textBreakdownDetails = textItems.length > 0 ? textItems.join('\n') : (cleanDet || `• *फीस जमा:* ₹${paidAmount}/-`);
-                    let voiceBreakdownText = voiceFeeList.length > 0 ? "जमा की गई मदों का विवरण इस प्रकार है: " + voiceFeeList.join(', ') + "। " : "";
-
-                    let textToSend = item.message;
-                    if (!textToSend || textToSend.trim() === '') {
-                        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* *${studentNameClean}*\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* \`${item.rid || 'N/A'}\` \n💰 *कुल जमा राशि:* ₹${paidAmount}/-\n\n📊 *जमा फीस मदवार विवरण (Fee Breakdown):*\n${textBreakdownDetails}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की डिजिटल PDF रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
-                    }
-
-                    await sock.sendMessage(jid, { text: textToSend });
-                    await new Promise(res => setTimeout(res, 1200));
-
-                    let voiceScript = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई में आपके प्रिय बच्चे ${studentNameClean} की कुल ${paidAmount} रुपये फीस सफलतापूर्वक जमा कर ली गई है। ${voiceBreakdownText}डिजिटल रसीद एवं बहीखाता विवरण संदेश में नीचे संलग्न है। धन्यवाद!`;
-                    
-                    try {
-                        const audioBuffer = await generateHindiVoiceNote(voiceScript);
-                        if (audioBuffer) {
-                            await sock.sendMessage(jid, {
-                                audio: audioBuffer,
-                                mimetype: 'audio/ogg; codecs=opus',
-                                ptt: true
-                            });
-                        }
-                    } catch (vErr) {
-                        console.error("❌ वॉइस नोट जनरेशन में एरर:", vErr.message);
-                    }
-
-                    await new Promise(res => setTimeout(res, 1200));
-
-                    try {
-                        await sendFeePdfReceipt(jid, item);
-                    } catch (pErr) {
-                        console.error("❌ PDF भेजने में एरर:", pErr.message);
-                    }
-                }
-
-                // 🎯 D. GENERAL TEXT MESSAGES (अन्य सामान्य संदेशों के लिए)
-                else {
-                    if (item.message && item.message.trim().length > 0) {
-                        await sock.sendMessage(jid, { text: item.message });
-                    }
-                    if (item.voiceText && item.voiceText.trim().length > 0) {
-                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
-                        if (audioBuffer) {
-                            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-                        }
-                    }
-                }
-
-                messageQueue.shift();
-            } else {
-                await new Promise(res => setTimeout(res, 2000));
-                break;
-            }
-
-            await new Promise(res => setTimeout(res, 2500));
-
-        } catch (err) {
-            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
-            messageQueue.shift();
-        }
+    if (isPromo) {
+        voiceScript = `नमस्कार! जे आर डी पब्लिक स्कूल मरुई में आपका हार्दिक स्वागत है। बधाई हो, आपके प्रिय बच्चे ${sName} को अगली कक्षा ${cName} में प्रमोट कर दिया गया है। नई कक्षा के लिए स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की हार्दिक शुभकामनाएँ!`;
+    } else {
+        voiceScript = `नमस्कार! जे आर डी PUBLIC SCHOOL मरुई परिवार में आपका हार्दिक स्वागत है। आपके प्रिय बच्चे ${sName} का कक्षा ${cName} में नया दाखिला सफलतापूर्वक पूर्ण हो चुका है। स्वीकृत फ़ीस का विवरण इस प्रकार है: ${feeDescText}। पूरे शैक्षणिक सत्र में कुल मिलाकर ${grandTotal} रुपये का शुल्क देय होगा। नये सत्र की ढेरों शुभकामनाएँ!`;
     }
 
-    isProcessingQueue = false;
+    console.log("🎙️ Generated Voice Script:", voiceScript);
+
+    // 🎙️ 3. ऑडियो वॉइस नोट जनरेट करना
+    const audioBuffer = await generateHindiVoiceNote(voiceScript);
+
+    if (audioBuffer) {
+        await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+        console.log("✅ वॉइस नोट व्हाट्सएप पर भेज दिया गया!");
+    }
+
+    // 💬 4. व्हाट्सएप मुख्य टेक्स्ट मैसेज
+    if (item.message && item.message.trim().length > 0) {
+        await sock.sendMessage(jid, { text: item.message });
+        await new Promise(res => setTimeout(res, 2000));
+    }
+
+    // 📄 5. A4 PDF बनाना और भेजना
+    await sendAdmissionOrPromotionPdf(jid, item);
 }
 
+               // 🎯 C. FEE PAYMENT RECEIPT (Text + Dynamic Breakdown Voice + PDF Combo)
+else if (item.type === 'FEE_RECEIPT' || item.type === 'PAYMENT' || (parseFloat(item.paid) > 0 && item.rid)) {
+    let cleanDet = (item.details || '').replace(/<br>/g, "\n");
+    let studentNameClean = item.name || item.studentName || 'छात्र';
+    let paidAmount = item.paid || item.amount || 0;
+    
+    // 📊 मदवार विवरण (Fee Breakdown) टेक्स्ट व वॉइस के लिए तैयार करना
+    let breakdownList = Array.isArray(item.breakdown) ? item.breakdown : [];
+    let voiceFeeList = [];
+    let textItems = [];
+
+    if (breakdownList.length > 0) {
+        breakdownList.forEach(b => {
+            let amt = parseFloat(b.received || b.amount || 0);
+            if (amt > 0) {
+                let labelName = b.label || 'शुल्क';
+                voiceFeeList.push(`${labelName} ${amt} रुपये`);
+                textItems.push(`• *${labelName}:* ₹${amt}/-`);
+            }
+        });
+    }
+
+    let textBreakdownDetails = textItems.length > 0 ? textItems.join('\n') : (cleanDet || `• *फीस जमा:* ₹${paidAmount}/-`);
+    let voiceBreakdownText = voiceFeeList.length > 0 ? "जमा की गई मदों का विवरण इस प्रकार है: " + voiceFeeList.join(', ') + "। " : "";
+
+    // 💬 व्हाट्सएप मुख्य टेक्स्ट संदेश
+    let textToSend = item.message;
+    if (!textToSend || textToSend.trim() === '') {
+        textToSend = `🏫 *J.R.D. PUBLIC SCHOOL*\n📍 *मरुई, वाराणसी (उ.प्र.)*\n🧾 *आधिकारिक फीस जमा रसीद*\n━━━━━━━━━━━━━━━━━━━━━━━\n👤 *छात्र का नाम:* *${studentNameClean}*\n🏫 *कक्षा:* ${item.className || item.class || 'N/A'}\n📅 *सत्र:* ${item.session || '2026-27'}\n🆔 *रसीद संख्या:* \`${item.rid || 'N/A'}\` \n💰 *कुल जमा राशि:* ₹${paidAmount}/-\n\n📊 *जमा फीस मदवार विवरण (Fee Breakdown):*\n${textBreakdownDetails}\n━━━━━━━━━━━━━━━━━━━━━━━\n_आपकी जमा फीस की डिजिटल PDF रसीद नीचे संलग्न है।_\nधन्यवाद! - JRD Management`;
+    }
+
+    // 1. पहले टेक्स्ट SMS भेजें
+    await sock.sendMessage(jid, { text: textToSend });
+    await new Promise(res => setTimeout(res, 1200));
+
+    // 2. AI HD डायनामिक वॉइस नोट (मदवार स्पष्ट आवाज में)
+    let voiceScript = `नमस्ते! प्रिय अभिभावक, जे आर डी पब्लिक स्कूल मरुई में आपके प्रिय बच्चे ${studentNameClean} की कुल ${paidAmount} रुपये फीस सफलतापूर्वक जमा कर ली गई है। ${voiceBreakdownText}डिजिटल रसीद एवं बहीखाता विवरण संदेश में नीचे संलग्न है। धन्यवाद!`;
+    
+    try {
+        const audioBuffer = await generateHindiVoiceNote(voiceScript);
+        if (audioBuffer) {
+            await sock.sendMessage(jid, {
+                audio: audioBuffer,
+                mimetype: 'audio/ogg; codecs=opus',
+                ptt: true
+            });
+        }
+    } catch (vErr) {
+        console.error("❌ वॉइस नोट जनरेशन में एरर:", vErr.message);
+    }
+
+    await new Promise(res => setTimeout(res, 1200));
+
+    // 3. ब्रांडेड PDF रसीद भेजें
+    try {
+        await sendFeePdfReceipt(jid, item);
+    } catch (pErr) {
+        console.error("❌ PDF भेजने में एरर:", pErr.message);
+    }
+}
+
+// 🎯 D. GENERAL TEXT MESSAGES (अन्य सामान्य संदेशों के लिए)
+else {
+    if (item.message && item.message.trim().length > 0) {
+        await sock.sendMessage(jid, { text: item.message });
+    }
+    if (item.voiceText && item.voiceText.trim().length > 0) {
+        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+        if (audioBuffer) {
+            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+        }
+    }
+}
+
+        messageQueue.shift();
+    } else {
+        await new Promise(res => setTimeout(res, 2000));
+        break;
+    }
+
+    await new Promise(res => setTimeout(res, 2500));
+
+} catch (err) {
+    console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+    messageQueue.shift();
+}
+}
+
+isProcessingQueue = false;
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -1009,6 +1024,7 @@ app.post('/enqueue-message', (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Missing phone/number field' });
     }
 
+    // 🎯 सुरक्षित नेस्टेड पेलोड मैपिंग (बिना किसी पुराने फ़ील्ड को हटाए)
     const stData = body.studentData || {};
     const fStruct = body.feeStructure || {};
 
@@ -1031,7 +1047,7 @@ app.post('/enqueue-message', (req, res) => {
         studentType: body.studentType || body.student_type || body.status || stData.type || 'REGULAR',
         paid: body.paid || body.amount || 0,
         totalAmount: body.totalAmount || fStruct.grand_total || fStruct.total_amount || 0,
-        feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body,
+        feeStructure: Object.keys(fStruct).length > 0 ? fStruct : body, // 🎯 Z-Engine फीस ऑब्जेक्ट
         voiceText: body.voiceText || '',
         upiLink: body.upiLink || '',
         qrUrl: body.qrUrl || '',
@@ -1063,7 +1079,6 @@ app.post('/send-whatsapp', async (req, res) => {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
-
 app.get('/qr', (req, res) => {
     if (isBotReady) {
         return res.send('<h2 style="font-family:sans-serif; text-align:center; margin-top:50px; color:green;">✅ JRD VIP ERP बोट व्हाट्सएप से कनेक्टेड है!</h2>');
@@ -1105,6 +1120,29 @@ app.get('/clear-lid-cache', (req, res) => {
     }
 });
 
+// =========================================================================
+// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CLEAN SINGLE VERSION)
+// =========================================================================
+app.get('/', (req, res) => {
+    res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`JRD VIP ERP Bot running on port ${PORT}`);
+});
+
+// बोट स्टार्ट करें
+startBot();
+
+// ⚡ सेल्फ-पिंग इंटरवल (Railway सर्वर को एक्टिव रखने के लिए)
+setInterval(() => {
+    https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
+        console.log('⚡ Self-Ping successful');
+    }).on('error', (err) => {
+        console.error('❌ Self-Ping error:', err.message);
+    });
+}, 4 * 60 * 1000);
 // 🎙️ 🎯 TEACHER & STUDENT LIVE ATTENDANCE WITH HINDI AI VOICE NOTE (PREMIUM)
 app.post('/send-attendance', async (req, res) => {
     const body = req.body || {};
@@ -1259,9 +1297,11 @@ app.post('/send-attendance', async (req, res) => {
             }
         }
 
+        // 🎯 1. पहले व्हाट्सएप टेक्स्ट मैसेज भेजें
         const sent = await sock.sendMessage(jid, { text: messageText });
         if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
 
+        // 🎯 2. फिर भारतीय महिला आवाज (Swara Neural) वाला AI वॉइस नोट जनरेट करके भेजें
         if (voiceScriptText && typeof generateHindiVoiceNote === 'function') {
             try {
                 const audioBuffer = await generateHindiVoiceNote(voiceScriptText);
@@ -1269,7 +1309,7 @@ app.post('/send-attendance', async (req, res) => {
                     await sock.sendMessage(jid, {
                         audio: audioBuffer,
                         mimetype: 'audio/ogg; codecs=opus',
-                        ptt: true
+                        ptt: true // WhatsApp Voice Note Style (हरा माइक)
                     });
                 }
             } catch (vErr) {
@@ -1287,25 +1327,3 @@ app.post('/send-attendance', async (req, res) => {
         return res.status(500).json({ status: 'error', message: error.toString() });
     }
 });
-
-// =========================================================================
-// 🚀 SERVER LISTEN & KEEP-ALIVE PING ENGINE (CLEAN SINGLE VERSION)
-// =========================================================================
-app.get('/', (req, res) => {
-    res.send(`JRD WhatsApp Bot Status: ${isBotReady ? 'Connected ✅' : 'Waiting for QR scan ⏳'}`);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`JRD VIP ERP Bot running on port ${PORT}`);
-});
-
-startBot();
-
-setInterval(() => {
-    https.get('https://jrd-whatsapp-bot-production.up.railway.app/', (res) => {
-        console.log('⚡ Self-Ping successful');
-    }).on('error', (err) => {
-        console.error('❌ Self-Ping error:', err.message);
-    });
-}, 4 * 60 * 1000);
