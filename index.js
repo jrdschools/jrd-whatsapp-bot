@@ -1416,8 +1416,7 @@ app.post('/send-attendance', async (req, res) => {
         if (type === 'TEACHER_ATTENDANCE') {
             if (status === 'ABSENT' || status === 'A') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *अनुपस्थिति सूचना (TEACHER ABSENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी स्थिति **अनुपस्थित (ABSENT)** दर्ज की गई है।\n\n_कृपया अपनी नियमित उपस्थिति बनाए रखें ताकि पठन-पाठन सुचारू रूप से चल सके।_\n━━━━━━━━━━━━━━━━━━━━━━━\n– Er. Sarvesh Verma (Management)`;
-                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई प्रबंधन द्वारा सूचित किया जाता है कि आज विद्यालय में आपकी स्थिति अनुपस्थित दर्ज की गई है। कृपया अपनी नियमित उपस्थिति बनाए रखें ताकि पठन-पाठन सुचारू रूप से चल सके।
- धन्यवाद!`;
+                voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई प्रबंधन द्वारा सूचित किया जाता है कि आज विद्यालय में आपकी स्थिति अनुपस्थित दर्ज की गई है। कृपया अपनी नियमित उपस्थिति बनाए रखें ताकि पठन-पाठन सुचारू रूप से चल सके। धन्यवाद!`;
             } else if (attType === 'OUT') {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n🚩 *शिक्षक प्रस्थान (OUT-TIME)*\n\nआदरणीय *${name}* जी,\n\n🕒 *प्रस्थान समय:* ${cleanTime}\n🏁 *स्थिति:* कार्य दिवस पूर्ण ✅\n\n🌺 *आज का आभार संदेश:*\n_"${todayOutQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आपका आज का प्रस्थान समय ${cleanTime} बजे सफलतापूर्वक दर्ज कर लिया गया है। ${todayOutQuote} धन्यवाद!`;
@@ -1428,20 +1427,7 @@ app.post('/send-attendance', async (req, res) => {
                 messageText = `🏫 *J.R.D. PUBLIC SCHOOL, मरुई*\n📅 *दिनांक:* ${todayStr}\n━━━━━━━━━━━━━━━━━━━━━━━\n✅ *उपस्थिति सूचना (PRESENT)*\n\nआदरणीय *${name}* जी,\nआज विद्यालय में आपकी उपस्थिति (**PRESENT**) दर्ज कर ली गई है।\n\n💭 *आज का विचार:*\n_"${todayInQuote}"_\n━━━━━━━━━━━━━━━━━━━━━━━\n– JRD Management`;
                 voiceScriptText = `नमस्ते! आदरणीय ${name} जी, जे आर डी पब्लिक स्कूल मरुई में आज आपकी उपस्थिति सफलतापूर्वक दर्ज कर ली गई है। ${todayInQuote} धन्यवाद!`;
             }
-      } else {
-            // 🎓 छात्र उपस्थिति एवं अनुपस्थिति संदेश इंजन (Gender-Free, 31 Quotes & Clean Class)
-            const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
-            
-            // क्लास से फालतू शब्द साफ करना (ताकि "कक्षा: Class 9" जैसी गलती न हो)
-            const cleanClass = String(className || '')
-                .replace(/class/gi, '')
-                .replace(/कक्षा/gi, '')
-                .replace(/th|st|nd|rd/gi, '')
-                .trim() || className;
-
-            const todayStudentQuote = studentQuotes[dayOfMonth] || studentQuotes[1];
-
-          } else {
+        } else {
             // 🎓 छात्र उपस्थिति एवं अनुपस्थिति संदेश इंजन (Only JRD Public School & Clean Voice Ending)
             const isAbsent = status.toLowerCase() === 'absent' || status.toLowerCase() === 'a' || status === 'अनुपस्थित';
             
@@ -1452,8 +1438,8 @@ app.post('/send-attendance', async (req, res) => {
                 .replace(/th|st|nd|rd/gi, '')
                 .trim() || className;
 
-            const todayStudentQuote = studentQuotes[dayOfMonth] || studentQuotes[1];
-            const todayAbsentQuote = absentQuotes[dayOfMonth] || absentQuotes[1];
+            const todayStudentQuote = (typeof studentQuotes !== 'undefined' && studentQuotes[dayOfMonth]) ? studentQuotes[dayOfMonth] : "परिश्रम ही सफलता की असली कुंजी है।";
+            const todayAbsentQuote = (typeof absentQuotes !== 'undefined' && absentQuotes[dayOfMonth]) ? absentQuotes[dayOfMonth] : "नियमितता ही सफलता की नींव है, एक भी दिन का अभाव प्रगति को धीमा कर देता है।";
 
             if (isAbsent) {
                 // 🔴 अनुपस्थित (ABSENT)
@@ -1499,6 +1485,7 @@ app.post('/send-attendance', async (req, res) => {
                 voiceScriptText = `आदरणीय अभिभावक जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल में आज आपके प्रिय पाल्य ${name}, कक्षा ${cleanClass}, समय से उपस्थित हैं। आज का प्रेरक विचार: ${todayStudentQuote}। कृपया घर पर भी इनके नियमित अध्ययन और गृहकार्य पर ध्यान दें। धन्यवाद!`;
             }
         }
+
         const sent = await sock.sendMessage(jid, { text: messageText });
         if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
 
