@@ -6,7 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@whiskeysockets/baileys": "latest",
     "axios": "^1.7.9",
     "express": "^4.21.2",
     "pdfkit": "^0.15.1",
