@@ -1269,7 +1269,7 @@ async function processQueue() {
                     }
                 }
 
-               // 🎯 E. BROADCAST (VOICE / PDF / TEXT)
+// 🎯 E. BROADCAST (VOICE / PDF / TEXT)
                 else {
                     const msgType = String(item.type || 'TEXT').toUpperCase();
                     const textBody = item.rawText || item.voiceText || item.message || '';
@@ -1277,7 +1277,7 @@ async function processQueue() {
                     const recipientName = item.name || item.studentName || 'All';
                     const todayStr = item.date || new Date().toLocaleDateString('en-GB');
 
-                    // 🎙️ 1. VOICE NOTE (PTT ऑडियो)
+                    // 🎙️ 1. केवल वॉइस नोट (PTT ऑडियो)
                     if (msgType === 'VOICE') {
                         const voiceScript = `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${textBody}। धन्यवाद!`;
                         const audioBuffer = await generateHindiVoiceNote(voiceScript);
@@ -1287,12 +1287,11 @@ async function processQueue() {
                                 mimetype: 'audio/ogg; codecs=opus', 
                                 ptt: true 
                             });
-                        }
-                        if (item.message) {
+                        } else {
                             await sock.sendMessage(jid, { text: item.message });
                         }
                     }
-                    // 📄 2. OFFICIAL PDF DOCUMENT (लेटरहेड PDF)
+                    // 📄 2. केवल लेटरहेड PDF नोटिस
                     else if (msgType === 'PDF' || msgType === 'DOCUMENT') {
                         const pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, textBody, recipientName, todayStr);
                         if (pdfBuffer) {
@@ -1300,29 +1299,19 @@ async function processQueue() {
                                 document: pdfBuffer,
                                 mimetype: 'application/pdf',
                                 fileName: `JRD_Notice_${Date.now()}.pdf`,
-                                caption: item.message || `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 *${noticeHeading}*`
+                                caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 *${noticeHeading}*\n━━━━━━━━━━━━━━━━━━━━━━━\n${textBody}\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`
                             });
                         } else {
                             await sock.sendMessage(jid, { text: item.message });
                         }
                     }
-                    // 💬 3. STANDARD TEXT
+                    // 💬 3. केवल सामान्य टेक्स्ट
                     else {
                         if (item.message && item.message.trim().length > 0) {
                             await sock.sendMessage(jid, { text: item.message });
                         }
                     }
                 }
-            }
-        } catch (err) {
-            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
-        } finally {
-            messageQueue.shift();
-            await new Promise(res => setTimeout(res, 2000));
-        }
-    }
-    isProcessingQueue = false;
-}
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
