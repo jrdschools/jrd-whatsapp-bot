@@ -818,6 +818,62 @@ async function sendFeeReminderPdf(jid, data) {
         }
     });
 }
+// 📄 OFFICIAL A4 JRD NOTICE PDF BUILDER (Letterhead Engine)
+function buildOfficialNoticePdfBuffer(title, message, recipientName, dateStr) {
+    return new Promise((resolve) => {
+        try {
+            const doc = new PDFDocument({ size: 'A4', margin: 30 });
+            let buffers = [];
+
+            doc.on('data', buffers.push.bind(buffers));
+            doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+            const mainColor = '#1A365D'; // Official Navy
+
+            // Watermark
+            doc.save();
+            doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
+            doc.fillColor(mainColor).fillOpacity(0.03).fontSize(38).font('Helvetica-Bold');
+            doc.text('J.R.D. PUBLIC SCHOOL', doc.page.width / 2 - 220, doc.page.height / 2 - 20, { align: 'center' });
+            doc.restore();
+
+            // Borders
+            doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).strokeColor(mainColor).stroke();
+            doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).strokeColor(mainColor).stroke();
+
+            // Header Banner
+            doc.rect(25, 25, doc.page.width - 50, 65).fillColor(mainColor).fill();
+            doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold').text('J.R.D. PUBLIC SCHOOL', 25, 34, { align: 'center' });
+            doc.fontSize(8.5).font('Helvetica').text('Gram & Post - Marui, Cholapur, Varanasi (U.P.) - 221208', 25, 59, { align: 'center' });
+            doc.fontSize(8).font('Helvetica-Bold').text('UDISE: 09670804504 | AFFILIATED TO BASIC SHIKSHA PARISHAD U.P.', 25, 71, { align: 'center' });
+
+            // Title Strip
+            doc.rect(25, 100, doc.page.width - 50, 24).fillColor('#F1F5F9').fill();
+            doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text(title || 'OFFICIAL CIRCULAR / आवश्यक सूचना', 25, 107, { align: 'center' });
+
+            // Meta Info
+            doc.fillColor('#334155').fontSize(9).font('Helvetica-Bold').text(`Date: ${dateStr || new Date().toLocaleDateString('en-GB')}`, 35, 135);
+            doc.text(`Recipient: ${recipientName || 'All Concerned'}`, doc.page.width - 200, 135, { align: 'right' });
+            doc.moveTo(25, 150).lineTo(doc.page.width - 25, 150).strokeColor('#CBD5E1').stroke();
+
+            // Notice Message Body
+            doc.fillColor('#0F172A').fontSize(10).font('Helvetica');
+            const cleanBody = (message || '').replace(/<br>/g, '\n').replace(/\*/g, '');
+            doc.text(cleanBody, 35, 165, { width: doc.page.width - 70, lineGap: 5, align: 'left' });
+
+            // Footer Signature
+            const sigY = doc.page.height - 75;
+            doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
+            doc.text('Authorized Signatory', 35, sigY);
+            doc.text('Principal / Official Seal', doc.page.width - 160, sigY, { align: 'right' });
+            doc.fontSize(7.5).font('Helvetica-Oblique').fillColor('#64748B').text('J.R.D. Public School Administration - System Generated Circular', 25, doc.page.height - 35, { align: 'center' });
+
+            doc.end();
+        } catch (e) {
+            resolve(null);
+        }
+    });
+}
 
 // 🎙️ सुरक्षित एवं क्रैश-प्रूफ Swara Neural AI वॉइस जनरेटर
 async function generateHindiVoiceNote(text) {
@@ -1213,15 +1269,47 @@ async function processQueue() {
                     }
                 }
 
-                // 🎯 E. GENERAL MESSAGES
+               // 🎯 E. BROADCAST (VOICE / PDF / TEXT)
                 else {
-                    if (item.message && item.message.trim().length > 0) {
-                        await sock.sendMessage(jid, { text: item.message });
-                    }
-                    if (item.voiceText && item.voiceText.trim().length > 0) {
-                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+                    const msgType = String(item.type || 'TEXT').toUpperCase();
+                    const textBody = item.rawText || item.voiceText || item.message || '';
+                    const noticeHeading = item.noticeTitle || 'OFFICIAL NOTICE';
+                    const recipientName = item.name || item.studentName || 'All';
+                    const todayStr = item.date || new Date().toLocaleDateString('en-GB');
+
+                    // 🎙️ 1. VOICE NOTE (PTT ऑडियो)
+                    if (msgType === 'VOICE') {
+                        const voiceScript = `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${textBody}। धन्यवाद!`;
+                        const audioBuffer = await generateHindiVoiceNote(voiceScript);
                         if (audioBuffer) {
-                            await sock.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+                            await sock.sendMessage(jid, { 
+                                audio: audioBuffer, 
+                                mimetype: 'audio/ogg; codecs=opus', 
+                                ptt: true 
+                            });
+                        }
+                        if (item.message) {
+                            await sock.sendMessage(jid, { text: item.message });
+                        }
+                    }
+                    // 📄 2. OFFICIAL PDF DOCUMENT (लेटरहेड PDF)
+                    else if (msgType === 'PDF' || msgType === 'DOCUMENT') {
+                        const pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, textBody, recipientName, todayStr);
+                        if (pdfBuffer) {
+                            await sock.sendMessage(jid, {
+                                document: pdfBuffer,
+                                mimetype: 'application/pdf',
+                                fileName: `JRD_Notice_${Date.now()}.pdf`,
+                                caption: item.message || `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 *${noticeHeading}*`
+                            });
+                        } else {
+                            await sock.sendMessage(jid, { text: item.message });
+                        }
+                    }
+                    // 💬 3. STANDARD TEXT
+                    else {
+                        if (item.message && item.message.trim().length > 0) {
+                            await sock.sendMessage(jid, { text: item.message });
                         }
                     }
                 }
