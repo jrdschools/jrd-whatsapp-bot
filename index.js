@@ -1277,7 +1277,7 @@ async function processQueue() {
                     const recipientName = item.name || item.studentName || 'All';
                     const todayStr = item.date || new Date().toLocaleDateString('en-GB');
 
-                    // 🎙️ 1. केवल वॉइस नोट (PTT ऑडियो)
+                    // 🎙️ 1. VOICE NOTE
                     if (msgType === 'VOICE') {
                         const voiceScript = `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${textBody}। धन्यवाद!`;
                         const audioBuffer = await generateHindiVoiceNote(voiceScript);
@@ -1287,11 +1287,9 @@ async function processQueue() {
                                 mimetype: 'audio/ogg; codecs=opus', 
                                 ptt: true 
                             });
-                        } else {
-                            await sock.sendMessage(jid, { text: item.message });
                         }
                     }
-                    // 📄 2. केवल लेटरहेड PDF नोटिस
+                    // 📄 2. PDF NOTICE
                     else if (msgType === 'PDF' || msgType === 'DOCUMENT') {
                         const pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, textBody, recipientName, todayStr);
                         if (pdfBuffer) {
@@ -1305,13 +1303,23 @@ async function processQueue() {
                             await sock.sendMessage(jid, { text: item.message });
                         }
                     }
-                    // 💬 3. केवल सामान्य टेक्स्ट
+                    // 💬 3. TEXT
                     else {
                         if (item.message && item.message.trim().length > 0) {
                             await sock.sendMessage(jid, { text: item.message });
                         }
                     }
                 }
+            } // 👈 1. if (sock && ...) बंद
+        } catch (err) {
+            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+        } finally {
+            messageQueue.shift();
+            await new Promise(res => setTimeout(res, 2000));
+        }
+    } // 👈 2. while (messageQueue.length > 0) बंद
+    isProcessingQueue = false;
+} // 👈 3. processQueue फ़ंक्शन बंद
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
