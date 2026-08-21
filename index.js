@@ -1269,41 +1269,68 @@ async function processQueue() {
                     }
                 }
 
-// 🎯 E. BROADCAST (VOICE / PDF / TEXT) — [पूरी तरह फिक्स]
+// 🎯 E. BROADCAST (VOICE / PDF / TEXT) — [NATIONAL LEVEL STABLE & DYNAMIC ENGINE]
                 else {
                     const msgType = String(item.msgType || item.type || 'TEXT').toUpperCase();
-                    const textBody = item.rawText || item.message || item.voiceText || '';
-                    const noticeHeading = item.noticeTitle || 'OFFICIAL NOTICE';
-                    const recipientName = item.name || item.studentName || 'All Concerned';
+                    const textBody = (item.message && item.message.trim().length > 0) ? item.message : (item.rawText || '');
+                    const cleanRawText = item.rawText || item.message || '';
+                    const noticeHeading = item.noticeTitle || 'OFFICIAL NOTICE / आवश्यक सूचना';
+                    const recipientName = item.name || item.studentName || 'अभिभावक / शिक्षक';
                     const todayStr = item.date || new Date().toLocaleDateString('en-GB');
 
-                    // 🎙️ 1. VOICE BROADCAST
+                    // 🎯 1. लाइव टाइपिंग सिमुलेशन (Demonstration & Anti-Ban Indicator)
+                    try {
+                        await sock.sendPresenceUpdate('composing', jid);
+                        await new Promise(r => setTimeout(r, 1500));
+                        await sock.sendPresenceUpdate('paused', jid);
+                    } catch (presenceErr) {}
+
+                    // 🎙️ 1. VOICE BROADCAST (Swara Neural HD Voice)
                     if (msgType === 'VOICE') {
-                        const voiceScript = `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${textBody}। धन्यवाद!`;
-                        const audioBuffer = await generateHindiVoiceNote(voiceScript);
+                        const voiceScript = (item.voiceText && item.voiceText.trim().length > 0)
+                            ? item.voiceText
+                            : `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${cleanRawText}। धन्यवाद!`;
+
+                        let audioBuffer = null;
+                        try {
+                            audioBuffer = await generateHindiVoiceNote(voiceScript);
+                        } catch (vErr) {
+                            console.error(`⚠️ Voice generation error for ${item.number}:`, vErr.message);
+                        }
+
                         if (audioBuffer) {
                             await sock.sendMessage(jid, { 
                                 audio: audioBuffer, 
                                 mimetype: 'audio/ogg; codecs=opus', 
                                 ptt: true 
                             });
+                        } else {
+                            // फॉलबैक: यदि ऑडियो रेंडर न हो पाए तो टेक्स्ट डिलीवर करें
+                            await sock.sendMessage(jid, { text: textBody });
                         }
                     }
-                    // 📄 2. PDF NOTICE BROADCAST
+                    // 📄 2. PDF NOTICE BROADCAST (Official A4 Letterhead Engine)
                     else if (msgType === 'PDF' || msgType === 'DOCUMENT') {
-                        const pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, textBody, recipientName, todayStr);
+                        let pdfBuffer = null;
+                        try {
+                            pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, cleanRawText, recipientName, todayStr);
+                        } catch (pErr) {
+                            console.error(`⚠️ PDF build error for ${item.number}:`, pErr.message);
+                        }
+
                         if (pdfBuffer) {
                             await sock.sendMessage(jid, {
                                 document: pdfBuffer,
                                 mimetype: 'application/pdf',
                                 fileName: `JRD_Notice_${Date.now()}.pdf`,
-                                caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 *${noticeHeading}*\n━━━━━━━━━━━━━━━━━━━━━━━\n${textBody}\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`
+                                caption: textBody
                             });
                         } else {
+                            // फॉलबैक: पीडीएफ न बनने की स्थिति में टेक्स्ट भेजें
                             await sock.sendMessage(jid, { text: textBody });
                         }
                     }
-                    // 💬 3. TEXT BROADCAST
+                    // 💬 3. TEXT BROADCAST (Full VIP School Template)
                     else {
                         if (textBody && textBody.trim().length > 0) {
                             await sock.sendMessage(jid, { text: textBody });
@@ -1312,19 +1339,19 @@ async function processQueue() {
                 }
             } // if (sock && ...) बंद
         } catch (err) {
-            console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
+            console.error(`❌ [त्रुटि] ऑटो संदेश विफल (${item.number}):`, err.message);
         } finally {
             messageQueue.shift();
-            // 🎯 WhatsApp बैन से सुरक्षा: 8 से 14 सेकंड का रैंडम गैप
+            // 🎯 WhatsApp बैन से सुरक्षा: 8 से 14 सेकंड का रैंडम मानवीय अंतराल
             if (messageQueue.length > 0) {
                 const waitTime = Math.floor(Math.random() * (14000 - 8000 + 1)) + 8000;
-                console.log(`⏱️ सुरक्षा ब्रेक: अगला संदेश ${Math.round(waitTime / 1000)} सेकंड बाद जाएगा...`);
+                console.log(`⏱️ अगला संदेश ${Math.round(waitTime / 1000)} सेकंड बाद भेजा जाएगा... (पेंडिंग: ${messageQueue.length})`);
                 await new Promise(res => setTimeout(res, waitTime));
             }
         }
     } // while (messageQueue.length > 0) बंद
     isProcessingQueue = false;
-} 
+} // processQueue फ़ंक्शन बंद
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
