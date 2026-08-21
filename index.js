@@ -1269,15 +1269,15 @@ async function processQueue() {
                     }
                 }
 
-// 🎯 E. BROADCAST (VOICE / PDF / TEXT)
+// 🎯 E. BROADCAST (VOICE / PDF / TEXT) — [पूरी तरह फिक्स]
                 else {
-                    const msgType = String(item.type || 'TEXT').toUpperCase();
-                    const textBody = item.rawText || item.voiceText || item.message || '';
+                    const msgType = String(item.msgType || item.type || 'TEXT').toUpperCase();
+                    const textBody = item.rawText || item.message || item.voiceText || '';
                     const noticeHeading = item.noticeTitle || 'OFFICIAL NOTICE';
-                    const recipientName = item.name || item.studentName || 'All';
+                    const recipientName = item.name || item.studentName || 'All Concerned';
                     const todayStr = item.date || new Date().toLocaleDateString('en-GB');
 
-                    // 🎙️ 1. VOICE NOTE
+                    // 🎙️ 1. VOICE BROADCAST
                     if (msgType === 'VOICE') {
                         const voiceScript = `आदरणीय ${recipientName} जी, सादर प्रणाम। जे आर डी पब्लिक स्कूल मरुई द्वारा आवश्यक सूचना: ${textBody}। धन्यवाद!`;
                         const audioBuffer = await generateHindiVoiceNote(voiceScript);
@@ -1289,7 +1289,7 @@ async function processQueue() {
                             });
                         }
                     }
-                    // 📄 2. PDF NOTICE
+                    // 📄 2. PDF NOTICE BROADCAST
                     else if (msgType === 'PDF' || msgType === 'DOCUMENT') {
                         const pdfBuffer = await buildOfficialNoticePdfBuffer(noticeHeading, textBody, recipientName, todayStr);
                         if (pdfBuffer) {
@@ -1300,26 +1300,31 @@ async function processQueue() {
                                 caption: `🏫 *J.R.D. PUBLIC SCHOOL*\n📄 *${noticeHeading}*\n━━━━━━━━━━━━━━━━━━━━━━━\n${textBody}\n━━━━━━━━━━━━━━━━━━━━━━━\n- JRD Management`
                             });
                         } else {
-                            await sock.sendMessage(jid, { text: item.message });
+                            await sock.sendMessage(jid, { text: textBody });
                         }
                     }
-                    // 💬 3. TEXT
+                    // 💬 3. TEXT BROADCAST
                     else {
-                        if (item.message && item.message.trim().length > 0) {
-                            await sock.sendMessage(jid, { text: item.message });
+                        if (textBody && textBody.trim().length > 0) {
+                            await sock.sendMessage(jid, { text: textBody });
                         }
                     }
                 }
-            } // 👈 1. if (sock && ...) बंद
+            } // if (sock && ...) बंद
         } catch (err) {
             console.error(`❌ ऑटो संदेश भेजने में त्रुटि (${item.number}):`, err.message);
         } finally {
             messageQueue.shift();
-            await new Promise(res => setTimeout(res, 2000));
+            // 🎯 WhatsApp बैन से सुरक्षा: 8 से 14 सेकंड का रैंडम गैप
+            if (messageQueue.length > 0) {
+                const waitTime = Math.floor(Math.random() * (14000 - 8000 + 1)) + 8000;
+                console.log(`⏱️ सुरक्षा ब्रेक: अगला संदेश ${Math.round(waitTime / 1000)} सेकंड बाद जाएगा...`);
+                await new Promise(res => setTimeout(res, waitTime));
+            }
         }
-    } // 👈 2. while (messageQueue.length > 0) बंद
+    } // while (messageQueue.length > 0) बंद
     isProcessingQueue = false;
-} // 👈 3. processQueue फ़ंक्शन बंद
+} 
 app.post('/enqueue-message', (req, res) => {
     const body = req.body || {};
     const targetPhone = body.number || body.phone || body.mobile || body.to;
@@ -1331,10 +1336,13 @@ app.post('/enqueue-message', (req, res) => {
     const stData = body.studentData || {};
     const fStruct = body.feeStructure || {};
 
-    messageQueue.push({
+   messageQueue.push({
         number: targetPhone.toString(),
         message: body.message || "",
         type: body.type || body.action || 'GENERAL',
+        msgType: body.msgType || body.type || 'TEXT',
+        rawText: body.rawText || body.message || '',
+        noticeTitle: body.noticeTitle || '',
         action: body.action || body.type || '',
         name: body.name || body.teacher_name || body.student_name || body.studentName || stData.name || '',
         studentName: body.studentName || body.name || body.student_name || stData.name || '',
@@ -1571,29 +1579,18 @@ app.post('/send-attendance', async (req, res) => {
             }
         }
 
-        const sent = await sock.sendMessage(jid, { text: messageText });
-        if (sent?.key?.id) messageCache.set(sent.key.id, { conversation: messageText });
+       // 🎯 सीधे भेजने के बजाय सेफ कतार (Queue) में पुश करें
+        messageQueue.push({
+            number: targetPhone.toString(),
+            message: messageText,
+            voiceScriptText: voiceScriptText,
+            type: type,
+            attendance_id: body.attendance_id || null
+        });
 
-        if (voiceScriptText) {
-            try {
-                const audioBuffer = await generateHindiVoiceNote(voiceScriptText);
-                if (audioBuffer) {
-                    await sock.sendMessage(jid, {
-                        audio: audioBuffer,
-                        mimetype: 'audio/ogg; codecs=opus',
-                        ptt: true
-                    });
-                }
-            } catch (vErr) {
-                console.error("⚠️ Voice note issue:", vErr.message);
-            }
-        }
+        processQueue();
 
-        if (updateAttendanceSmsStatus && body.attendance_id) {
-            updateAttendanceSmsStatus(body.attendance_id, 'SENT');
-        }
-
-        return res.status(200).json({ status: 'success', message: 'Attendance message & Voice note sent successfully' });
+        return res.status(200).json({ status: 'success', message: 'Attendance message queued safely' });
     } catch (error) {
         console.error('❌ Attendance sending error:', error.message);
         return res.status(500).json({ status: 'error', message: error.toString() });
