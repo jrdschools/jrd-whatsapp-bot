@@ -819,6 +819,7 @@ async function sendFeeReminderPdf(jid, data) {
     });
 }
 // 📄 OFFICIAL A4 JRD NOTICE PDF BUILDER (Letterhead Engine)
+// 📄 OFFICIAL A4 JRD NOTICE PDF BUILDER (Letterhead Engine - Upgraded Safe Version)
 function buildOfficialNoticePdfBuffer(title, message, recipientName, dateStr) {
     return new Promise((resolve) => {
         try {
@@ -830,14 +831,14 @@ function buildOfficialNoticePdfBuffer(title, message, recipientName, dateStr) {
 
             const mainColor = '#1A365D'; // Official Navy
 
-            // Watermark
+            // Watermark (बैकग्राउंड वाटरमार्क)
             doc.save();
             doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
             doc.fillColor(mainColor).fillOpacity(0.03).fontSize(38).font('Helvetica-Bold');
             doc.text('J.R.D. PUBLIC SCHOOL', doc.page.width / 2 - 220, doc.page.height / 2 - 20, { align: 'center' });
             doc.restore();
 
-            // Borders
+            // Borders (डबल बॉर्डर)
             doc.rect(15, 15, doc.page.width - 30, doc.page.height - 30).lineWidth(2).strokeColor(mainColor).stroke();
             doc.rect(19, 19, doc.page.width - 38, doc.page.height - 38).lineWidth(0.5).strokeColor(mainColor).stroke();
 
@@ -847,21 +848,32 @@ function buildOfficialNoticePdfBuffer(title, message, recipientName, dateStr) {
             doc.fontSize(8.5).font('Helvetica').text('Gram & Post - Marui, Cholapur, Varanasi (U.P.) - 221208', 25, 59, { align: 'center' });
             doc.fontSize(8).font('Helvetica-Bold').text('UDISE: 09670804504 | AFFILIATED TO BASIC SHIKSHA PARISHAD U.P.', 25, 71, { align: 'center' });
 
-            // Title Strip
+            // Title Strip (शीर्षक पट्टी)
             doc.rect(25, 100, doc.page.width - 50, 24).fillColor('#F1F5F9').fill();
-            doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text(title || 'OFFICIAL CIRCULAR / आवश्यक सूचना', 25, 107, { align: 'center' });
+            const cleanTitle = safePdfText(title, 'OFFICIAL CIRCULAR / NOTICE');
+            doc.fillColor(mainColor).fontSize(11).font('Helvetica-Bold').text(cleanTitle, 25, 107, { align: 'center' });
 
-            // Meta Info
-            doc.fillColor('#334155').fontSize(9).font('Helvetica-Bold').text(`Date: ${dateStr || new Date().toLocaleDateString('en-GB')}`, 35, 135);
-            doc.text(`Recipient: ${recipientName || 'All Concerned'}`, doc.page.width - 200, 135, { align: 'right' });
+            // Meta Info (दिनांक और प्राप्तकर्ता)
+            const cleanRecipient = safePdfText(recipientName, 'All Concerned');
+            const cleanDate = dateStr || new Date().toLocaleDateString('en-GB');
+
+            doc.fillColor('#334155').fontSize(9).font('Helvetica-Bold').text(`Date: ${cleanDate}`, 35, 135);
+            doc.text(`Recipient: ${cleanRecipient}`, doc.page.width - 200, 135, { align: 'right' });
             doc.moveTo(25, 150).lineTo(doc.page.width - 25, 150).strokeColor('#CBD5E1').stroke();
 
-            // Notice Message Body
+            // Notice Message Body (टेक्स्ट को साफ़ और सही लाइनिंग में प्रिंट करना)
             doc.fillColor('#0F172A').fontSize(10).font('Helvetica');
-            const cleanBody = (message || '').replace(/<br>/g, '\n').replace(/\*/g, '');
-            doc.text(cleanBody, 35, 165, { width: doc.page.width - 70, lineGap: 5, align: 'left' });
+            
+            let rawMsg = String(message || '').replace(/<br\s*[\/]?>/gi, '\n').replace(/\*/g, '');
+            let cleanBody = safePdfText(rawMsg, 'Official notice text detail.');
 
-            // Footer Signature
+            doc.text(cleanBody, 35, 165, { 
+                width: doc.page.width - 70, 
+                lineGap: 5, 
+                align: 'left' 
+            });
+
+            // Footer Signature (हस्ताक्षर एवं मुहर)
             const sigY = doc.page.height - 75;
             doc.fillColor('#0F172A').fontSize(9).font('Helvetica-Bold');
             doc.text('Authorized Signatory', 35, sigY);
@@ -870,6 +882,7 @@ function buildOfficialNoticePdfBuffer(title, message, recipientName, dateStr) {
 
             doc.end();
         } catch (e) {
+            console.error('❌ PDF Buffer Build Error:', e.message);
             resolve(null);
         }
     });
@@ -1268,6 +1281,24 @@ async function processQueue() {
                         console.error("❌ Teacher PDF बनाने/भेजने में त्रुटि:", pErr.message);
                     }
                 }
+                    // 🎯 D2. TEACHER & STUDENT LIVE ATTENDANCE (TEXT + SWARA AI VOICE)
+                else if (item.type === 'ATTENDANCE_ALERT' || item.type === 'STUDENT_ATTENDANCE' || item.type === 'TEACHER_ATTENDANCE') {
+                    if (item.message && item.message.trim().length > 0) {
+                        await sock.sendMessage(jid, { text: item.message });
+                        await new Promise(res => setTimeout(res, 1200));
+                    }
+
+                    if (item.voiceText && item.voiceText.trim().length > 0) {
+                        const audioBuffer = await generateHindiVoiceNote(item.voiceText);
+                        if (audioBuffer) {
+                            await sock.sendMessage(jid, { 
+                                audio: audioBuffer, 
+                                mimetype: 'audio/ogg; codecs=opus', 
+                                ptt: true 
+                            });
+                        }
+                    }
+                }
 
 // 🎯 E. BROADCAST (VOICE / PDF / TEXT) — [NATIONAL LEVEL STABLE & DYNAMIC ENGINE]
                 else {
@@ -1606,12 +1637,12 @@ app.post('/send-attendance', async (req, res) => {
             }
         }
 
-       // 🎯 सीधे भेजने के बजाय सेफ कतार (Queue) में पुश करें
+      // 🎯 सीधे भेजने के बजाय सेफ कतार (Queue) में पुश करें
         messageQueue.push({
             number: targetPhone.toString(),
             message: messageText,
-            voiceScriptText: voiceScriptText,
-            type: type,
+            voiceText: voiceScriptText,
+            type: 'ATTENDANCE_ALERT',
             attendance_id: body.attendance_id || null
         });
 
